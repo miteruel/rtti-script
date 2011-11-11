@@ -72,12 +72,14 @@ var
    index: integer;
 begin
    opcode := prog.Text[startpos + ref.location];
-   assert(opcode.op = OP_CALL);
+   assert(opcode.op in [OP_CALL, OP_PCAL]);
    assert(opcode.right = -1);
    index := prog.routines[ref.name].index;
    if index < 0 then
    begin
-      opcode.op := OP_CALX;
+      if opcode.op = OP_CALL then
+         opcode.op := OP_CALX
+      else opcode.op := OP_PCLX;
       opcode.right := -index;
    end
    else opcode.right := (startpos + ref.location) - index;
