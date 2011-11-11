@@ -21,7 +21,7 @@ unit rsParser;
 interface
 uses
    SysUtils, RTTI, TypInfo,
-   Generics.Collections,
+   Classes, Generics.Collections,
    rsDefs, rsLexer;
 
 type
@@ -55,6 +55,7 @@ type
       FEnvironment: ISymbolTable;
       FUnitDict: TDictionary<string, TUnitSymbol>;
       FScopeStack: TStack<ISymbolTable>;
+      FScopeStackA: TArray<ISymbolTable>;
       FQueue: TTokenQueue;
       FLexer: TrsLexer;
       FCurrentUnit: TUnitSymbol;
@@ -67,12 +68,15 @@ type
       FExceptDepth: integer;
       FInImplementation: boolean;
       FEofExpected: boolean;
+      FSemCount: integer;
 
       procedure Expect(kind: TTokenKind); overload;
       function Expect(kinds: TTokenSet): TTokenKind; overload;
       procedure Verify(kind: TTokenKind); overload;
       function Verify(kinds: TTokenSet): TTokenKind; overload;
       function Check(kind: TTokenKind): boolean;
+      procedure EnsureScopeArray;
+      procedure ScopeStackChange(Sender: TObject; const Item: ISymbolTable; Action: TCollectionNotification);
       function TrySymbolLookup(const name: string; out value: TSymbol): boolean;
       function SymbolLookup(const name: string): TSymbol; overload;
       function AncestorSymbolLookup(const name: string; const namespace: ISymbolTable): TSymbol;
@@ -209,7 +213,7 @@ type
 
 implementation
 uses
-   Windows, Classes, Math;
+   Windows, Math;
 
 type
 //minor hack
@@ -221,6 +225,7 @@ constructor TrsParser.Create(sysUnit: TUnitSymbol; const onUses: TUseUnitProc;
   const onVerifyAttr: TVerifyAttrProc);
 begin
    FScopeStack := TStack<ISymbolTable>.Create;
+   FScopeStack.OnNotify := self.ScopeStackChange;
    FUnitDict := TDictionary<string, TUnitSymbol>.Create;
    assert(sysUnit.name = 'SYSTEM');
    FPublicSymbols := CreateSymbolTable(false);
@@ -252,6 +257,8 @@ end;
 
 procedure TrsParser.Next;
 begin
+   if FCurrent.kind = tkSem then
+      inc(FSemCount);
    if assigned(FLexer) then
       FLexer.Lex(FCurrent)
    else FCurrent := FQueue.Extract;
@@ -295,16 +302,27 @@ begin
       Next;
 end;
 
+procedure TrsParser.ScopeStackChange(Sender: TObject; const Item: ISymbolTable;
+  Action: TCollectionNotification);
+begin
+   SetLength(FScopeStackA, 0);
+end;
+
+procedure TrsParser.EnsureScopeArray;
+begin
+   if length(FScopeStackA) = 0 then
+      FScopeStackA := FScopeStack.ToArray;
+end;
+
 function TrsParser.TrySymbolLookup(const name: string; out value: TSymbol): boolean;
 var
    i: integer;
    uName: string;
-   tables: TArray<ISymbolTable>;
 begin
    uName := UpperCase(name);
-   tables := FScopeStack.ToArray;
-   for i := high(tables) downto 0 do
-      if tables[i].TryGetValue(uName, value) then
+   EnsureScopeArray;
+   for i := high(FScopeStackA) downto 0 do
+      if FScopeStackA[i].TryGetValue(uName, value) then
          Exit(true);
    if assigned(FEnvironment) then
    begin
@@ -620,6 +638,7 @@ begin
    //minor optimization to avoid negating constants in output
    if TUnOpSyntax(result).sub.kind = skValue then
       EvalUnOp(result, false);
+   result.sem := FSemCount;
 end;
 
 function ConstArrayFromArray(value: TArraySyntax; destType: PTypeInfo = nil): TValueSyntax;
@@ -703,10 +722,11 @@ begin
    result := ReadFactor;
    while FCurrent.kind in [tkTimes, tkDivide, tkDiv, tkMod, tkAnd, tkShl, tkShr, tkAs] do
    try
-      if result.&type = TypeOfNativeType(TypeInfo(boolean)) then
+      if result.&type = BooleanType then
          Break;
       op := TokenToBinOp;
       result := TBinOpSyntax.Create(op, result, ReadFactor);
+      TBinOpSyntax(result).left.sem := FSemCount;
    except
       result.Free;
       raise;
@@ -722,6 +742,7 @@ begin
    try
       op := TokenToBinOp;
       result := TBinOpSyntax.Create(op, result, ReadTerm);
+      TBinOpSyntax(result).left.sem := FSemCount;
    except
       result.Free;
       raise;
@@ -738,6 +759,7 @@ begin
    try
       op := TokenToBoolOp;
       result := TBoolOpSyntax.Create(op, result, ReadSubExpression);
+      TBoolOpSyntax(result).left.sem := FSemCount;
    except
       result.Free;
       raise;
@@ -934,6 +956,7 @@ begin
       skUnOp: EvalUnOp(value, constOnly);
       skArray: EvalArraySyntax(value, constOnly);
    end;
+   value.sem := FSemCount;
 
    if constOnly and (value.kind <> skValue) then
       raise EParseError.Create('Constant expression required');
@@ -1495,7 +1518,7 @@ end;
 procedure TrsParser.CheckBooleanCondition(var cond: TTypedSyntax);
 begin
    try
-      CheckCompatibleTypes(TypeOfNativeType(TypeInfo(boolean)), cond.&type, true);
+      CheckCompatibleTypes(BooleanType, cond.&type, true);
       EvalExpression(cond, false);
    except
       FreeAndNil(cond);
@@ -1620,6 +1643,7 @@ begin
       raise;
    end;
    result := TCallSyntax.Create(sym, params);
+   result.sem := FSemCount;
 end;
 
 function TrsParser.ParseGoto: TJumpSyntax;
@@ -1788,6 +1812,8 @@ begin
          cond := TBoolOpSyntax.Create(OPS[down], TVariableSyntax.Create(index), TVariableSyntax.Create(uSymbol))
       end;
       CheckBooleanCondition(cond);
+      cond.sem := 0;
+      TBoolOpSyntax(cond).left.sem := 0;
    except
       lBound.Free;
       uBound.Free;
@@ -1874,6 +1900,11 @@ begin
    Next; //Expect(tkWhile)
    cond := ReadExpression(tkDo);
    CheckBooleanCondition(cond);
+   cond.sem := 0;
+   if cond.kind = skBoolOp then
+      TBoolOpSyntax(cond).left.sem := 0
+   else if cond.kind = skBinOp then
+      TBinOpSyntax(cond).left.sem := 0;
    result := (ReadLoopBody(cond, nil, exitTo));
 end;
 
@@ -2298,6 +2329,7 @@ function TrsParser.DoParse(const ExpectedName: string): TUnitSymbol;
 begin
 //OutputDebugString('SAMPLING ON');
    try
+      FSemCount := 0;
       case Expect([tkProgram, tkUnit]) of
          tkProgram: raise EParseError.Create('Program parsing is not supported yet'); //TODO: support this
          tkUnit: result := ParseUnit(ExpectedName);
@@ -2306,7 +2338,6 @@ begin
    except
       on EParseError do
       begin
-//         FreeAndNil(FCurrent);
          raise; //TODO: make this show an error later
       end;
    end;

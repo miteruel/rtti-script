@@ -316,11 +316,14 @@ type
    end;
 
    TTypedSyntax = class(TSyntax)
+   private
+      FSem: integer;
    protected
       function GetType: TTypeSymbol; virtual; abstract;
    public
       function GetSelfValue: TVarSymbol; virtual;
       property &type: TTypeSymbol read GetType;
+      property sem: integer read FSem write FSem;
    end;
 
    TValueSyntax = class(TTypedSyntax)
@@ -591,6 +594,8 @@ function NativeTypeDefined(value: TRttiType): boolean;
 function TypeOfNativeType(value: PTypeInfo): TTypeSymbol;
 function TypeOfRttiType(value: TRttiType): TTypeSymbol;
 function TypeOfValue(const value: TValue): TTypeSymbol;
+function BooleanType: TTypeSymbol;
+
 function FindNativeType(const name: string): TTypeSymbol;
 function MakeArrayPropType(base: TTypeSymbol): TTypeSymbol;
 procedure AddArrayType(value: TArrayTypeSymbol);
@@ -618,7 +623,6 @@ begin
    FColumn := column;
    FStart := start;
    FLength := length;
-//   FOrigText := otext;
 end;
 
 function TToken.GetOrigText: string;
@@ -632,15 +636,12 @@ var
    otext: string;
 begin
    oText := GetOrigText;
-   if kind = tkChar then
-      result := oText
-   else if kind = tkString then
-   begin
-      result := AnsiDequotedStr(oText, '''');
-      if length(result) = 1 then
-         FKind := tkChar;
-   end
-   else result := UpperCase(oText);
+   case kind of
+      tkIdentifier: result := UpperCase(oText);
+      tkChar: result := oText;
+      tkString: result := AnsiDequotedStr(oText, '''');
+      else result := oText;
+   end;
 end;
 
 { TSyntax }
@@ -719,7 +720,7 @@ end;
 
 function TBoolOpSyntax.GetType: TTypeSymbol;
 begin
-   result := TypeOfNativeType(TypeInfo(boolean));
+   result := BooleanType;
 end;
 
 { TSymbol }
@@ -1675,32 +1676,17 @@ var
 
 procedure AddNativeType(nativeType: TRttiType; new: TTypeSymbol);
 begin
-   sync.BeginWrite;
-   try
-      LTypeTable.Add(nativeType, new);
-   finally
-      sync.EndWrite;
-   end;
+   LTypeTable.Add(nativeType, new);
 end;
 
 function NativeTypeDefined(value: TRttiType): boolean;
 begin
-   sync.BeginRead;
-   try
-      result := LTypeTable.ContainsKey(value);
-   finally
-      sync.EndRead;
-   end;
+   result := LTypeTable.ContainsKey(value);
 end;
 
 function TypeOfRttiType(value: TRttiType): TTypeSymbol;
 begin
-   sync.BeginRead;
-   try
       result := LTypeTable[value];
-   finally
-      sync.EndRead;
-   end;
 end;
 
 function TypeOfNativeType(value: PTypeInfo): TTypeSymbol;
@@ -1713,19 +1699,24 @@ begin
    result := TypeOfNativeType(value.TypeInfo);
 end;
 
+var
+   LBoolType: TTypeSymbol = nil;
+
+function BooleanType: TTypeSymbol;
+begin
+   if not assigned(LBoolType) then
+      LBoolType := TypeOfNativeType(TypeInfo(boolean));
+   result := LBoolType;
+end;
+
 function FindNativeType(const name: string): TTypeSymbol;
 begin
-   sync.BeginRead;
-   try
-      result := TEnex.FirstWhereOrDefault<TTypeSymbol>(LTypeTable.Values,
-        function(value: TTypeSymbol): boolean
-        begin
-           result := AnsiSameText(value.Name, name);
-        end,
-        nil);
-   finally
-      sync.EndRead;
-   end;
+   result := TEnex.FirstWhereOrDefault<TTypeSymbol>(LTypeTable.Values,
+     function(value: TTypeSymbol): boolean
+     begin
+        result := AnsiSameText(value.Name, name);
+     end,
+     nil);
    if result = nil then
       raise EParseError.CreateFmt('Type "%s" has not been imported.', [name]);
 end;

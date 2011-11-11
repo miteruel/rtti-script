@@ -41,11 +41,14 @@ type
       FLocals: TStringList;
       FCurrent: TrsScriptUnit;
       FFreeReg: integer;
+      FTempReg: integer;
+      FTempList: TList<integer>;
+      FTempQueue: TQueue<integer>;
       FTryStack: TStack<TPair<TSyntaxKind, integer>>;
       FUnresStack: TStack<TPair<string, TReferenceType>>;
       FDebug: boolean;
 
-      function NextReg: integer;
+      function NextReg(temp: integer = 0): integer;
       procedure Write(const opcode: TrsAsmInstruction);
       procedure WriteOp(opcode: TrsOpcode; left: integer = 0; right: integer = 0);
 
@@ -144,10 +147,14 @@ begin
    FLocals := TStringList.Create;
    FUnresolvedJumpTable := TList<TPair<string, integer>>.Create;
    FUnresStack := TStack<TPair<string, TReferenceType>>.Create;
+   FTempList := TList<integer>.Create;
+   FTempQueue := TQueue<integer>.Create;
 end;
 
 destructor TrsCodegen.Destroy;
 begin
+   FTempQueue.Free;
+   FTempList.Free;
    FJumpTable.Free;
    FUnresStack.Free;
    FUnresolvedJumpTable.Free;
@@ -158,8 +165,7 @@ end;
 
 procedure TrsCodegen.Write(const opcode: TrsAsmInstruction);
 begin
-   if not (opcode.op in [low(TrsOpcode)..High(TrsOpcode)]) then
-      asm int 3 end;
+   assert(opcode.op in [low(TrsOpcode)..High(TrsOpcode)]);
    FCurrent.Text.Add(opcode);
 end;
 
@@ -175,7 +181,7 @@ end;
 
 function TrsCodegen.WriteConst(value: TValueSyntax): TrsAsmInstruction;
 begin
-   result.left := NextReg;
+   result.left := NextReg(value.sem);
    if value.value.Kind = tkInteger then
    begin
       result.op := OP_MOVI;
@@ -196,13 +202,17 @@ begin
    result.right := Eval(value.right);
 
    left := Eval(value.left);
+   if left = -1 then
+      popUnres;
    if left > FLocals.Count then
       result.left := left
    else begin
-      new := NextReg;
+      new := NextReg(value.sem);
       WriteOp(OP_MOV, new, left);
       result.left := new;
    end;
+   if result.right = -1 then
+      popUnres;
    result.op := OPCODES[value.op];
    if (result.op = OP_ADD) and (value.left.&type.TypeInfo.Kind in [tkWString, tkWChar]) then
       result.op := OP_SCAT;
@@ -216,7 +226,7 @@ begin
       result.right := Eval(value.sub);
       if (value.op = opNot) and (result.right = 0) then
          result.left := 0
-      else result.left := NextReg;
+      else result.left := NextReg(value.sem);
    end
    else begin
       result.left := Eval(value.sub);
@@ -269,16 +279,16 @@ begin
    if value.symbol is TFieldSymbol then
    begin
       result.op := OP_MOVF;
-      result.left := NextReg;
+      result.left := NextReg(value.sem);
       result.right := TFieldSymbol(value.symbol).index;
    end
    else if value.symbol is TPropSymbol then
    begin
       result.op := OP_MOVP;
-      result.left := NextReg;
+      result.left := NextReg(value.sem);
       result.right := TPropSymbol(value.symbol).index;
    end
-   else if value.&type = TypeOfNativeType(TypeInfo(boolean)) then
+   else if value.&type = BooleanType then
    begin
       result.op := OP_MOV;
       result.left := 0;
@@ -319,6 +329,8 @@ begin
 end;
 
 procedure TrsCodegen.PushParam(param: TTypedSyntax);
+var
+   left: integer;
 begin
    if param.kind = skValue then
    begin
@@ -326,23 +338,28 @@ begin
          WriteOp(OP_PSHI, TValueSyntax(param).value.AsInteger)
       else WriteOp(OP_PSHC, FConstTable.AddObject(TValueSyntax(param).value.ToString, pointer(TValueSyntax(param).value.TypeInfo)));
    end
-   else WriteOp(OP_PUSH, Eval(param));
+   else begin
+      left := Eval(param);
+      if left = -1 then
+         PopUnres;
+      WriteOp(OP_PUSH, left);
+   end;
 end;
 
 function TrsCodegen.WriteCall(value: TCallSyntax): TrsAsmInstruction;
 var
    param: TTypedSyntax;
 begin
-   WriteOp(OP_LIST);
+   WriteOp(OP_LIST, value.params.Count);
    for param in value.params do
       PushParam(param);
    result.op := OP_CALL;
    result.right := ResolveCall(value.proc.fullName, FCurrent.Text.Count);
    if assigned(value.proc.&Type) then
    begin
-      if value.proc.&type = TypeOfNativeType(TypeInfo(boolean)) then
+      if value.proc.&type = BooleanType then
          result.left := 0
-      else result.left := NextReg;
+      else result.left := NextReg(value.sem);
    end
    else result.left := -1;
 end;
@@ -362,7 +379,7 @@ function TrsCodegen.WriteElem(value: TElemSyntax): TrsAsmInstruction;
 var
    left: integer;
 begin
-   result.left := NextReg;
+   result.left := NextReg(value.sem);
    result.right := Eval(value.Right);
    result.op := OP_ELEM;
    if result.right = -1 then
@@ -402,7 +419,7 @@ begin
    if (value.Base.&type.TypeInfo.Kind = tkInteger)  and (value.&type.TypeInfo.Kind = tkFloat) then
    begin
       result.op := OP_AITF;
-      result.left := NextReg;
+      result.left := NextReg(value.sem);
       result.right := Eval(value.Base);
    end
    else raise EParseError.Create('Corrupt parse tree');
@@ -425,7 +442,7 @@ begin
    WriteOp(OP_SRLD, left);
 
    result.op := OP_MVAP;
-   result.left := NextReg;
+   result.left := NextReg(value.sem);
    result.right := ((Base.Right as TVariableSyntax).Symbol as TPropSymbol).index;
 end;
 
@@ -454,10 +471,30 @@ begin
    else result := 0;
 end;
 
-function TrsCodegen.NextReg: integer;
+function TrsCodegen.NextReg(temp: integer): integer;
+var
+   reg: integer;
 begin
+   if temp > 0 then
+   begin
+      if temp <> FTempReg then
+      begin
+         FTempReg := temp;
+         for reg in FTempList do
+            FTempQueue.Enqueue(reg);
+         FTempList.Clear;
+      end;
+      if FTempQueue.Count > 0 then
+      begin
+         result := FTempQueue.Dequeue;
+         FTempList.Add(result);
+         Exit;
+      end;
+   end;
    inc(FFreeReg);
    result := FFreeReg;
+   if temp > 0 then
+      FTempList.Add(result);
 end;
 
 procedure TrsCodegen.WriteJump(value: TJumpSyntax);
@@ -543,9 +580,17 @@ begin
 end;
 
 procedure TrsCodegen.AssignLValue(lValue: TTypedSyntax; rValue: integer);
+var
+   left: integer;
 begin
    case lValue.kind of
-      skVariable: WriteOp(OP_VASN, VariableIndex(TVariableSyntax(lValue).symbol), rValue);
+      skVariable:
+      begin
+         left := VariableIndex(TVariableSyntax(lValue).symbol);
+         if left = -1 then
+            PopUnres;
+         WriteOp(OP_VASN, left, rValue);
+      end;
       skElem: AssignElem(TElemSyntax(lValue), rValue);
       skDot: AssignDot(TDotSyntax(lValue), rValue);
       skArrayProp: AssignArrayProp(TArrayPropSyntax(lValue), rValue);
@@ -775,15 +820,13 @@ begin
    for i := table.Count - 1 downto 0 do
    begin
       ref := table[i];
-      assert ((ref.refType = rtCall) and AnsiStartsText(unitname, ref.name) );
-//      if (ref.refType = rtCall) and AnsiStartsText(unitname, ref.name) then
       begin
          left := ResolveCall(ref.name, ref.location);
          assert(left >= 0);
          ChangeLeftValue(ref.location, left);
-         table.Delete(i);
       end;
    end;
+   table.Clear;
 end;
 
 procedure TrsCodegen.SetupUnitGlobals(&unit: TUnitSymbol; rsu: TrsScriptUnit);
@@ -829,7 +872,7 @@ begin
                                                                 proc.parent = &unit));
          end;
          SetupUnitGlobals(&unit, result);
-         if index > procs.Count then
+         if not &unit.IsExternal then
             ResolveUnitLocalCalls(&unit);
       finally
          procs.Free;

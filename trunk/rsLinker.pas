@@ -119,11 +119,11 @@ var
    info: TrsProcInfo;
    scriptClass: TNewClass;
 begin
-   if rsu.IsExternal and (prog.Text.Count > 0) then
+   if rsu.IsExternal and (length(prog.Text) > 0) then
       raise ELinkError.Create('Invalid unit order');
-   start := prog.Text.Count;
+   start := length(prog.Text);
    FStartLocations.AddObject(rsu.name, TObject(start));
-   prog.Text.AddRange(rsu.Text);
+   prog.AddText(rsu.Text);
    for pair in rsu.Routines do
    begin
       info := pair.Value;
