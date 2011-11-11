@@ -115,6 +115,8 @@ type
       procedure PushValue(l: integer);
       procedure Call(l, r: integer);
       procedure Callx(l, r: integer);
+      procedure PCall(l, r: integer);
+      procedure PCallx(l, r: integer);
       procedure ArrayLoad(l: integer);
       procedure ArrayElemMove(l, r: integer);
       procedure CompEqi(l, r: integer);
@@ -443,6 +445,30 @@ begin
    else FContext.locals[l] := method.Invoke(GetSR, args);
 end;
 
+procedure TrsExec.PCall(l, r: integer);
+var
+   args: TArray<TValue>;
+begin
+   args := FParamLists.Peek.ToArray;
+   FParamLists.Pop;
+   FStack.Push(FContext);
+   FParamLists.peek.Add(InvokeCode(FContext.ip + r, args));
+   FContext := FStack.Pop;
+end;
+
+procedure TrsExec.PCallx(l, r: integer);
+var
+   args: TArray<TValue>;
+   method: TRttiMethod;
+begin
+   args := FParamLists.Peek.ToArray;
+   FParamLists.Pop;
+   method := FExtRoutines[r];
+   if method.IsStatic then
+      FParamLists.peek.Add(RTTI.Invoke(method.CodeAddress, args, method.CallingConvention, method.ReturnType.Handle))
+   else FParamLists.peek.Add(method.Invoke(GetSR, args));
+end;
+
 procedure TrsExec.ArrayLoad(l: integer);
 begin
    if not (FContext.locals[l].IsArray) then
@@ -542,6 +568,8 @@ begin
          OP_PSHC: PushConst(op.left);
          OP_CALL: Call(op.left, op.right);
          OP_CALX: CallX(op.left, op.right);
+         OP_PCAL: PCall(op.left, op.right);
+         OP_PCLX: PCallX(op.left, op.right);
          OP_INIT: CorruptError;
          OP_RET:  Break;
                    //-1 because IP will increment after the loop

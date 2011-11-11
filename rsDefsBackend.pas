@@ -71,6 +71,8 @@ type
       OP_PSHC, //Add a constant to the param list
       OP_CALL, //call with the current param list
       OP_CALX, //call an external function with the current param list
+      OP_PCAL, //call and push result
+      OP_PCLX, //call external and push result
       OP_INIT, //Initialize new function call with a certain number of temp variables
       OP_RET,  //return
       OP_JUMP, //unconditional jump

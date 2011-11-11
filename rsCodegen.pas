@@ -331,6 +331,7 @@ end;
 procedure TrsCodegen.PushParam(param: TTypedSyntax);
 var
    left: integer;
+   last: TrsAsmInstruction;
 begin
    if param.kind = skValue then
    begin
@@ -342,7 +343,13 @@ begin
       left := Eval(param);
       if left = -1 then
          PopUnres;
-      WriteOp(OP_PUSH, left);
+      last := FCurrent.Text.Last;
+      if last.op = OP_CALL then
+      begin
+         FCurrent.Text.Delete(FCurrent.Text.Count - 1);
+         WriteOp(OP_PCAL, last.left, last.right);
+      end
+      else WriteOp(OP_PUSH, left);
    end;
 end;
 
