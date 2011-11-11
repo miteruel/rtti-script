@@ -39,6 +39,15 @@ type
       end;
 
       TsrPair = TPair<TValue, integer>;
+      TSimpleParamList = class
+      private
+         FValues: TArray<TValue>;
+         FCount: integer;
+      public
+         constructor Create(size: integer);
+         procedure Add(const value: TValue);
+         property ToArray: TArray<TValue> read FValues;
+      end;
 
    private
       //debug routine for until I get an actual debugger set up
@@ -55,10 +64,11 @@ type
       FStack: TStack<TVmContext>;
       FSrStack: TStack<TsrPair>;
       FContext: TVmContext;
-      FParamLists: TObjectStack<TList<TValue>>;
+      FParamLists: TObjectStack<TSimpleParamList>;
       FNewClasses: TList<TClass>;
       FConstants: array of TValue;
       FLastImport: TPair<string, TDictionary<string, pointer>>;
+      FText: TArray<TrsAsmInstruction>;
 
       function GetProc(const name: string; count: integer): TRttiMethod;
       procedure CreateMethodPointer(method: TRttiMethod; var address: pointer);
@@ -101,7 +111,7 @@ type
       procedure CompNeq(l, r: integer);
       function RegAsBoolean(index: integer): boolean;
       procedure XorbRegs(l, r: integer);
-      procedure NewList;
+      procedure NewList(l: integer);
       procedure PushValue(l: integer);
       procedure Call(l, r: integer);
       procedure Callx(l, r: integer);
@@ -161,7 +171,7 @@ constructor TrsExec.Create;
 begin
    FHeap := TPrivateHeap.Create;
    FProcMap := TMultimap<string, TRttiMethod>.Create;
-   FParamLists := TObjectStack<TList<TValue>>.Create;
+   FParamLists := TObjectStack<TSimpleParamList>.Create;
    FParamLists.OwnsObjects := true;
    FNewClasses := TList<TClass>.Create;
    FImpls := TObjectList<TMethodImplementation>.Create;
@@ -389,9 +399,9 @@ begin
    FContext.br := RegAsBoolean(l) xor RegAsBoolean(r);
 end;
 
-procedure TrsExec.NewList;
+procedure TrsExec.NewList(l: integer);
 begin
-   FParamLists.Push(TList<TValue>.Create);
+   FParamLists.Push(TSimpleParamList.Create(l));
 end;
 
 procedure TrsExec.PushValue(l: integer);
@@ -429,7 +439,7 @@ begin
    FParamLists.Pop;
    method := FExtRoutines[r];
    if method.IsStatic then
-      FContext.locals[l] := method.Invoke(nil, args)
+      FContext.locals[l] := RTTI.Invoke(method.CodeAddress, args, method.CallingConvention, method.ReturnType.Handle)
    else FContext.locals[l] := method.Invoke(GetSR, args);
 end;
 
@@ -482,11 +492,11 @@ end;
 
 function TrsExec.RunLoop(resultIndex: integer; expected: TrsOpcode): TValue;
 var
-   op: TrsAsmInstruction;
+   op: ^TrsAsmInstruction;
 begin
    repeat
       inc(FContext.ip);
-      op := FProgram.Text[FContext.ip];
+      op := @FText[FContext.ip];
       case op.op of
          OP_NOP:  ;
          OP_ADD:  AddRegs(op.left, op.right);
@@ -526,7 +536,7 @@ begin
          OP_IN:   NotImplemented;
          OP_IS:   NotImplemented;
          OP_XORB: XorbRegs(op.left, op.right);
-         OP_LIST: NewList;
+         OP_LIST: NewList(op.left);
          OP_PUSH: PushValue(op.left);
          OP_PSHI: PushInt(op.left);
          OP_PSHC: PushConst(op.left);
@@ -615,7 +625,7 @@ begin
    if FLastImport.Key <> unitName then
    begin
       if not FExtUnits.TryGetValue(unitName, proc) then
-         raise ErsRuntimeError.CreateFmt('Import proc for unit %s not found', [classname]);
+         raise ErsRuntimeError.CreateFmt('Import proc for unit %s not found', [UnitName]);
       result := TDictionary<string, pointer>.Create;
       dict := result;
       procImporter :=
@@ -688,6 +698,7 @@ procedure TrsExec.Load(prog: TrsProgram);
 begin
    assert(FProgram = nil); //fix this after changing to interfaces
    FProgram := prog;
+   FText := FProgram.Text;
    LoadProcs;
    LoadConstants;
    if FRunOnLoad then
@@ -763,6 +774,19 @@ var
 begin
    for i := 0 to high(FContext.locals) do
       Writeln(format('%d: %s', [i, FContext.locals[i].ToString]));
+end;
+
+{ TrsExec.TSimpleParamList }
+
+constructor TrsExec.TSimpleParamList.Create(size: integer);
+begin
+   SetLength(FValues, size);
+end;
+
+procedure TrsExec.TSimpleParamList.Add(const value: TValue);
+begin
+   FValues[FCount] := value;
+   inc(FCount);
 end;
 
 end.

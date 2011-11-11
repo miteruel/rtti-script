@@ -149,7 +149,7 @@ type
 
    TrsProgram = class
    private
-      FText: TList<TrsAsmInstruction>;
+      FText: TArray<TrsAsmInstruction>;
       FRoutines: TDictionary<string, TrsProcInfo>;
       FGlobals: TStringList;
       FConstants: TStringList;
@@ -161,7 +161,9 @@ type
       constructor Create;
       destructor Destroy; override;
       procedure InstallPackage(proc: TGetCodeAddressProc);
-      property Text: TList<TrsAsmInstruction> read FText;
+      procedure AddText(const value: TList<TrsAsmInstruction>);
+
+      property Text: TArray<TrsAsmInstruction> read FText;
       property Routines: TDictionary<string, TrsProcInfo> read FRoutines;
       property Units: TList<INewUnit> read FUnits;
       property Globals: TStringList read FGlobals;
@@ -218,9 +220,17 @@ end;
 
 { TrsProgram }
 
+procedure TrsProgram.AddText(const value: TList<TrsAsmInstruction>);
+var
+   index: integer;
+begin
+   index := length(FText);
+   SetLength(FText, index + value.Count);
+   Move(value.ToArray[0], FText[index], value.Count * sizeof(TrsAsmInstruction));
+end;
+
 constructor TrsProgram.Create;
 begin
-   FText := TList<TrsAsmInstruction>.Create;
    FRoutines := TDictionary<string, TrsProcInfo>.Create;
    FGlobals := TStringList.Create;
    FGlobals.Add('');
@@ -232,7 +242,6 @@ destructor TrsProgram.Destroy;
 begin
    FUnits.Free;
    FScriptClasses.Free;
-   FText.Free;
    FRoutines.Free;
    FGlobals.Free;
    FConstants.Free;

@@ -198,7 +198,7 @@ var
    name: string;
    units: TUnitList;
 begin
-//OutputDebugString('SAMPLING ON');
+OutputDebugString('SAMPLING ON');
    if assigned(FUseStack) and (FUseStack.Count > 0) then
       name := FUseStack.Peek
    else name := '';
@@ -222,7 +222,7 @@ begin
       if name = '' then
          Reset;
    end;
-//OutputDebugString('SAMPLING OFF');
+OutputDebugString('SAMPLING OFF');
 end;
 
 procedure TrsCompiler.AddType(info: PTypeInfo; parent: TUnitSymbol);
