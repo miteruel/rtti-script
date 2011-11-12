@@ -1842,7 +1842,8 @@ begin
       result.Add(cond);
       result.Add(TJumpSyntax.Create(breakTo, true));
       try
-         result.Add(ReadLineOrBlock(breakTo, continueTo, exitTo));
+         if FCurrent.kind <> tkSem then
+            result.Add(ReadLineOrBlock(breakTo, continueTo, exitTo));
       except
          step.Free;
          raise;

@@ -424,11 +424,15 @@ end;
 procedure TrsExec.Call(l, r: integer);
 var
    args: TArray<TValue>;
+   retval: TValue;
 begin
    args := FParamLists.Peek.ToArray;
    FParamLists.Pop;
    FStack.Push(FContext);
-   FContext.locals[l] := InvokeCode(FContext.ip + r, args);
+   retval := InvokeCode(FContext.ip + r, args);
+   //TODO: this will break if a function returns nil. Hooray for the semipredicate problem!  Fix this.
+   if not retval.IsEmpty then
+      FContext.locals[l] := retval;
    FContext := FStack.Pop;
 end;
 
@@ -436,13 +440,22 @@ procedure TrsExec.Callx(l, r: integer);
 var
    args: TArray<TValue>;
    method: TRttiMethod;
+   handle: PTypeInfo;
+   retval: TValue;
 begin
    args := FParamLists.Peek.ToArray;
    FParamLists.Pop;
    method := FExtRoutines[r];
    if method.IsStatic then
-      FContext.locals[l] := RTTI.Invoke(method.CodeAddress, args, method.CallingConvention, method.ReturnType.Handle)
-   else FContext.locals[l] := method.Invoke(GetSR, args);
+   begin
+      if assigned(method.ReturnType) then
+         handle := method.ReturnType.Handle
+      else handle := nil;
+      retval := RTTI.Invoke(method.CodeAddress, args, method.CallingConvention, Handle)
+   end
+   else retval := method.Invoke(GetSR, args);
+   if assigned(method.ReturnType) then
+      FContext.locals[l] := retval;
 end;
 
 procedure TrsExec.PCall(l, r: integer);
@@ -748,6 +761,7 @@ begin
    if methods.Count = 1 then
       exit(methods[0]);
 
+   result := nil;
    methods := TEnex.Where<TRttiMethod>(methods,
      function(method: TRttiMethod): boolean
      begin

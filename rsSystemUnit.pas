@@ -91,7 +91,8 @@ begin
    table.Add(UpperCase(rType.Name), clsType);
 
    table.Add('CRLF', TConstSymbol.Create('CRLF', #13#10));
-   AddNativeType(nil, TTypeSymbol.Create('NULL*TYPE'));
+   if not NativeTypeDefined(nil) then
+      AddNativeType(nil, TTypeSymbol.Create('NULL*TYPE'));
 end;
 
 end.
