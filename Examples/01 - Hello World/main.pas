@@ -47,10 +47,8 @@ const
    SCRIPT =
       'unit hello;' + CRLF +
       'procedure Test;' + CRLF +
-      'var i: integer;' + CRLF +
       'begin' + CRLF +
       '   ShowMessage(''Hello World!'');' + CRLF +
-      '   for i := 1 to 5 do ;' + CRLF +
       'end;' + CRLF +
       'end.';
 var
