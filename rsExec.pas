@@ -819,6 +819,7 @@ begin
       classdot := FEnvironment.ClassName + '.';
       methods := TRttiContext.Create.GetType(FEnvironment.ClassInfo).GetMethods;
       SetLength(FExtRoutines, length(methods));
+      i := 0;
       for method in methods do
          if FProgram.Routines.TryGetValue(classdot + UpperCase(method.Name), info) then
          begin
