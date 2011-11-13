@@ -30,6 +30,7 @@
 			<DCC_ExeOutput>.\$(Config)\$(Platform)</DCC_ExeOutput>
 		</PropertyGroup>
 		<PropertyGroup Condition="'$(Cfg_1)'!=''">
+			<DCC_UnitSearchPath>..\..\source;..\..\source\RTTI Creation;$(DCC_UnitSearchPath)</DCC_UnitSearchPath>
 			<DCC_DebugDCUs>true</DCC_DebugDCUs>
 			<DCC_Define>DEBUG;$(DCC_Define)</DCC_Define>
 			<DCC_Optimize>false</DCC_Optimize>
@@ -48,9 +49,9 @@
 			<DCCReference Include="main.pas">
 				<Form>frmHelloWorld</Form>
 			</DCCReference>
-			<DCCReference Include="..\..\rsCompiler.pas"/>
-			<DCCReference Include="..\..\rsExec.pas"/>
-			<DCCReference Include="..\..\rsDefsBackend.pas"/>
+			<DCCReference Include="..\..\source\rsCompiler.pas"/>
+			<DCCReference Include="..\..\source\rsDefsBackend.pas"/>
+			<DCCReference Include="..\..\source\rsExec.pas"/>
 			<BuildConfiguration Include="Release">
 				<Key>Cfg_2</Key>
 				<CfgParent>Base</CfgParent>
