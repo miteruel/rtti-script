@@ -1634,16 +1634,16 @@ begin
       if assigned(selfSymbol) then
          params.Insert(0, TVariableSyntax.Create(selfSymbol));
       CheckParamList(sym.paramList, params);
-      if assigned(sym.paramList) and
-         (sym.paramList.Count > 0) and
-         AnsiSameText(sym.paramList[0].name, 'self') then
-         params.Delete(0);
    except
       params.Free;
       raise;
    end;
    result := TCallSyntax.Create(sym, params);
    result.sem := FSemCount;
+   if assigned(sym.paramList) and
+      (sym.paramList.Count > 0) and
+      AnsiSameText(sym.paramList[0].name, 'self') then
+         result.SelfSymbol := params.Extract(params.First);
 end;
 
 function TrsParser.ParseGoto: TJumpSyntax;

@@ -449,6 +449,8 @@ type
    private
       FProc: TProcSymbol;
       FParams: TList<TTypedSyntax>;
+      FSelfSymbol: TTypedSyntax;
+      procedure SetSelf(const Value: TTypedSyntax);
    protected
       function GetType: TTypeSymbol; override;
    public
@@ -457,6 +459,7 @@ type
       function GetSelfValue: TVarSymbol; override;
       property proc: TProcSymbol read FProc;
       property params: TList<TTypedSyntax> read FParams;
+      property SelfSymbol: TTypedSyntax read FSelfSymbol write SetSelf;
    end;
 
    TDotSyntax = class(TTypedSyntax)
@@ -1315,6 +1318,7 @@ end;
 
 destructor TCallSyntax.Destroy;
 begin
+   FSelfSymbol.Free;
    FParams.Free;
    inherited;
 end;
@@ -1329,6 +1333,12 @@ end;
 function TCallSyntax.GetType: TTypeSymbol;
 begin
    result := FProc.FType;
+end;
+
+procedure TCallSyntax.SetSelf(const Value: TTypedSyntax);
+begin
+   assert(FSelfSymbol = nil);
+   FSelfSymbol := Value;
 end;
 
 { TTryCallSyntax }

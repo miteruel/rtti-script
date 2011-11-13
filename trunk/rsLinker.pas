@@ -37,7 +37,7 @@ type
    public
       constructor Create;
       destructor Destroy; override;
-      function Link(const units: TUnitList; constants: TStringList; environment: TObject): TrsProgram;
+      function Link(const units: TUnitList; constants: TStringList; environment: TClass): TrsProgram;
    end;
 
    ELinkError = class(Exception);
@@ -144,7 +144,7 @@ begin
 
 end;
 
-function TrsLinker.Link(const units: TUnitList; constants: TStringList; environment: TObject): TrsProgram;
+function TrsLinker.Link(const units: TUnitList; constants: TStringList; environment: TClass): TrsProgram;
 var
    rsu: TrsScriptUnit;
 begin
@@ -152,7 +152,7 @@ begin
    FExtRoutines := -1;
    result := TrsProgram.Create;
    if assigned(environment) then
-      result.Globals.AddObject('ENVIRONMENT*SELF', environment);
+      result.Globals.AddObject('ENVIRONMENT*SELF', environment.ClassInfo);
    for rsu in units do
       IntegrateUnit(rsu, result);
 
