@@ -64,6 +64,8 @@ type
       FStack: TStack<TVmContext>;
       FSrStack: TStack<TsrPair>;
       FContext: TVmContext;
+      FGlobals: TArray<TValue>;
+      FEnvironment: TObject;
       FParamLists: TObjectStack<TSimpleParamList>;
       FNewClasses: TList<TClass>;
       FConstants: array of TValue;
@@ -82,9 +84,14 @@ type
       procedure RegisterProcs(const unitName: string; method: TRttiMethod; var address: pointer);
       procedure LoadProcs;
       procedure LoadConstants;
+      procedure LoadGlobals;
+      procedure LoadEnvironment;
       function DoImport(const unitName: string): TDictionary<string, pointer>;
 
+      function GetValue(i: integer): PValue;
+      procedure SetValue(i: integer; const val: TValue);
       function GetSR: TValue;
+
       procedure AddRegs(l, r: integer);
       procedure SubRegs(l, r: integer);
       procedure MulRegs(l, r: integer);
@@ -142,6 +149,7 @@ type
       function GetProcAddress(const name: string): pointer;
 
       procedure RegisterStandardUnit(const name: string; const proc: TrsExecImportProc);
+      procedure SetEnvironment(value: TObject);
 
       property RunOnLoad: boolean read FRunOnLoad write FRunOnLoad;
    end;
@@ -150,7 +158,7 @@ type
 
 implementation
 uses
-   StrUtils, Types, TypInfo, Windows,
+   StrUtils, Types, TypInfo, Math, //Windows,
    rsEnex,
    vmtStructure;
 
@@ -167,6 +175,7 @@ begin
    raise ErsRuntimeError.Create('Not Implemented Error');
 end;
 
+{$q+}{$r+}
 { TrsExec }
 
 constructor TrsExec.Create;
@@ -198,38 +207,48 @@ begin
 end;
 
 procedure TrsExec.AddRegs(l, r: integer);
+var
+   val: PValue;
 begin
-   case FContext.locals[l].Kind of
-      tkInteger: FContext.locals[l] := FContext.locals[l].AsInteger + FContext.locals[r].AsInteger;
-      tkFloat: FContext.locals[l] := FContext.locals[l].AsExtended + FContext.locals[r].AsExtended;
+   val := GetValue(l);
+   case val.Kind of
+      tkInteger: SetValue(l, val.AsInteger + GetValue(r).AsInteger);
+      tkFloat: SetValue(l, val.AsExtended + GetValue(r).AsExtended);
       else CorruptError;
    end;
 end;
 
 procedure TrsExec.SubRegs(l, r: integer);
+var
+   val: PValue;
 begin
-   case FContext.locals[l].Kind of
-      tkInteger: FContext.locals[l] := FContext.locals[l].AsInteger - FContext.locals[r].AsInteger;
-      tkFloat: FContext.locals[l] := FContext.locals[l].AsExtended - FContext.locals[r].AsExtended;
+   val := GetValue(l);
+   case val.Kind of
+      tkInteger: SetValue(l, val.AsInteger - GetValue(r).AsInteger);
+      tkFloat: SetValue(l, val.AsExtended - GetValue(r).AsExtended);
       else CorruptError;
    end;
 end;
 
 procedure TrsExec.MulRegs(l, r: integer);
+var
+   val, val2: PValue;
 begin
-   if (FContext.locals[l].Kind = tkInteger) and (FContext.locals[r].Kind = tkInteger) then
-      FContext.locals[l] := FContext.locals[l].AsInteger * FContext.locals[r].AsInteger
-   else FContext.locals[l] := FContext.locals[l].AsExtended * FContext.locals[r].AsExtended;
+   val := GetValue(l);
+   val2 := GetValue(r);
+   if (val.Kind = tkInteger) and (val2.Kind = tkInteger) then
+      SetValue(l, val.AsInteger * val2.AsInteger)
+   else SetValue(l, val.AsExtended * val2.AsExtended)
 end;
 
 procedure TrsExec.DivRegs(l, r: integer);
 begin
-   FContext.locals[l] := FContext.locals[l].AsInteger div FContext.locals[r].AsInteger
+   SetValue(l, GetValue(l).AsInteger div GetValue(r).AsInteger);
 end;
 
 procedure TrsExec.FdivRegs(l, r: integer);
 begin
-   FContext.locals[l] := FContext.locals[l].AsExtended / FContext.locals[r].AsExtended
+   SetValue(l, GetValue(l).AsExtended / GetValue(r).AsExtended)
 end;
 
 procedure TrsExec.ModRegs(l, r: integer);
@@ -239,54 +258,57 @@ end;
 
 procedure TrsExec.AndRegs(l, r: integer);
 begin
-   FContext.locals[l] := FContext.locals[l].AsInteger and FContext.locals[r].AsInteger
+   SetValue(l, GetValue(l).AsInteger mod GetValue(r).AsInteger);
 end;
 
 procedure TrsExec.OrRegs(l, r: integer);
 begin
-   FContext.locals[l] := FContext.locals[l].AsInteger or FContext.locals[r].AsInteger
+   SetValue(l, GetValue(l).AsInteger or GetValue(r).AsInteger);
 end;
 
 procedure TrsExec.XorRegs(l, r: integer);
 begin
-   FContext.locals[l] := FContext.locals[l].AsInteger xor FContext.locals[r].AsInteger
+   SetValue(l, GetValue(l).AsInteger xor GetValue(r).AsInteger);
 end;
 
 procedure TrsExec.ShlRegs(l, r: integer);
 begin
-   FContext.locals[l] := FContext.locals[l].AsInteger shl FContext.locals[r].AsInteger
+   SetValue(l, GetValue(l).AsInteger shl GetValue(r).AsInteger);
 end;
 
 procedure TrsExec.ShrRegs(l, r: integer);
 begin
-   FContext.locals[l] := FContext.locals[l].AsInteger shr FContext.locals[r].AsInteger
+   SetValue(l, GetValue(l).AsInteger shr GetValue(r).AsInteger);
 end;
 
 procedure TrsExec.StringConcat(l, r: integer);
 begin
-   FContext.locals[l] := FContext.locals[l].AsString + FContext.locals[r].AsString;
+   SetValue(l, GetValue(l).AsString + GetValue(r).AsString);
 end;
 
 procedure TrsExec.MovRegs(l, r: integer);
 begin
-   FContext.locals[l] := FContext.locals[r];
+   SetValue(l, GetValue(r)^);
 end;
 
 procedure TrsExec.MovConst(l, r: integer);
 begin
-   FContext.locals[l] := FConstants[r];
+   SetValue(l, FConstants[r]);
 end;
 
 procedure TrsExec.MovInt(l, r: integer);
 begin
-   FContext.locals[l] := r;
+   SetValue(l, r);
 end;
 
 procedure TrsExec.NegRegister(l, r: integer);
+var
+   val2: PValue;
 begin
-   case FContext.locals[r].Kind of
-      tkInteger: FContext.locals[l] := -FContext.locals[r].AsInteger;
-      tkFloat: FContext.locals[l] := -FContext.locals[r].AsExtended;
+   val2 := GetValue(r);
+   case val2.Kind of
+      tkInteger: SetValue(l, -val2.AsInteger);
+      tkFloat: SetValue(l,-val2.AsExtended);
       else CorruptError;
    end;
 end;
@@ -297,36 +319,50 @@ begin
       FContext.br := not FContext.br
    else begin
       FContext.br := not FContext.locals[r].AsBoolean;
-      FContext.locals[l] := FContext.br;
+      SetValue(l, FContext.br);
    end;
 end;
 
 procedure TrsExec.IncRegister(l: integer);
+var
+   val: PValue;
 begin
-   FContext.locals[l] := FContext.locals[l].AsInteger + 1;
+   val := GetValue(l);
+   val^ := val.AsInteger + 1;
 end;
 
 procedure TrsExec.DecRegister(l: integer);
+var
+   val: PValue;
 begin
-   FContext.locals[l] := FContext.locals[l].AsInteger - 1;
+   val := GetValue(l);
+   val^ := val.AsInteger - 1;
 end;
 
 procedure TrsExec.CompGte(l, r: integer);
+var
+   val, val2: PValue;
 begin
-   case FContext.locals[l].Kind of
-      tkInteger: FContext.br := FContext.locals[l].AsInteger >= FContext.locals[r].AsInteger;
-      tkFloat: FContext.br := FContext.locals[l].AsExtended >= FContext.locals[r].AsExtended;
-      tkString, tkChar: FContext.br := FContext.locals[l].AsString >= FContext.locals[r].AsString;
+   val := GetValue(l);
+   val2 := GetValue(r);
+   case val.Kind of
+      tkInteger: FContext.br := val.AsInteger >= val2.AsInteger;
+      tkFloat: FContext.br := val.AsExtended >= val2.AsExtended;
+      tkString, tkChar: FContext.br := val.AsString >= val2.AsString;
       else CorruptError;
    end;
 end;
 
 procedure TrsExec.CompLte(l, r: integer);
+var
+   val, val2: PValue;
 begin
-   case FContext.locals[l].Kind of
-      tkInteger: FContext.br := FContext.locals[l].AsInteger <= FContext.locals[r].AsInteger;
-      tkFloat: FContext.br := FContext.locals[l].AsExtended <= FContext.locals[r].AsExtended;
-      tkString, tkChar: FContext.br := FContext.locals[l].AsString <= FContext.locals[r].AsString;
+   val := GetValue(l);
+   val2 := GetValue(r);
+   case val.Kind of
+      tkInteger: FContext.br := val.AsInteger <= val2.AsInteger;
+      tkFloat: FContext.br := val.AsExtended <= val2.AsExtended;
+      tkString, tkChar: FContext.br := val.AsString <= val2.AsString;
       else CorruptError;
    end;
 end;
@@ -344,43 +380,47 @@ begin
 end;
 
 procedure TrsExec.CompEq(l, r: integer);
+var
+   val, val2: PValue;
 begin
-   case FContext.locals[l].Kind of
-      tkInteger: FContext.br := FContext.locals[l].AsInteger = FContext.locals[r].AsInteger;
-      tkFloat: FContext.br := FContext.locals[l].AsExtended = FContext.locals[r].AsExtended;
-      tkString, tkChar: FContext.br := FContext.locals[l].AsString = FContext.locals[r].AsString;
+   val := GetValue(l);
+   val2 := GetValue(r);
+   case val.Kind of
+      tkInteger: FContext.br := val.AsInteger = val2.AsInteger;
+      tkFloat: FContext.br := val.AsExtended = val2.AsExtended;
+      tkString, tkChar: FContext.br := val.AsString = val2.AsString;
       else CorruptError;
    end;
 end;
 
 procedure TrsExec.CompGtei(l, r: integer);
 begin
-   FContext.br := FContext.locals[l].AsInteger >= r;
+   FContext.br := GetValue(l).AsInteger >= r;
 end;
 
 procedure TrsExec.CompLtei(l, r: integer);
 begin
-   FContext.br := FContext.locals[l].AsInteger <= r;
+   FContext.br := GetValue(l).AsInteger <= r;
 end;
 
 procedure TrsExec.CompGti(l, r: integer);
 begin
-   FContext.br := FContext.locals[l].AsInteger > r;
+   FContext.br := GetValue(l).AsInteger > r;
 end;
 
 procedure TrsExec.CompLti(l, r: integer);
 begin
-   FContext.br := FContext.locals[l].AsInteger < r;
+   FContext.br := GetValue(l).AsInteger < r;
 end;
 
 procedure TrsExec.CompEqi(l, r: integer);
 begin
-   FContext.br := FContext.locals[l].AsInteger = r;
+   FContext.br := GetValue(l).AsInteger = r;
 end;
 
 procedure TrsExec.CompNeqi(l, r: integer);
 begin
-   FContext.br := FContext.locals[l].AsInteger <> r;
+   FContext.br := GetValue(l).AsInteger <> r;
 end;
 
 procedure TrsExec.CompNeq(l, r: integer);
@@ -393,7 +433,7 @@ function TrsExec.RegAsBoolean(index: integer): boolean;
 begin
    if index = 0 then
       result := FContext.br
-   else result := FContext.locals[index].AsBoolean;
+   else result := GetValue(index).AsBoolean;
 end;
 
 procedure TrsExec.XorbRegs(l, r: integer);
@@ -408,7 +448,7 @@ end;
 
 procedure TrsExec.PushValue(l: integer);
 begin
-   FParamLists.peek.Add(FContext.locals[l]);
+   FParamLists.peek.Add(GetValue(l)^);
 end;
 
 procedure TrsExec.PushInt(l: integer);
@@ -432,7 +472,7 @@ begin
    retval := InvokeCode(FContext.ip + r, args);
    //TODO: this will break if a function returns nil. Hooray for the semipredicate problem!  Fix this.
    if not retval.IsEmpty then
-      FContext.locals[l] := retval;
+      SetValue(l, retval);
    FContext := FStack.Pop;
 end;
 
@@ -455,7 +495,7 @@ begin
    end
    else retval := method.Invoke(GetSR, args);
    if assigned(method.ReturnType) then
-      FContext.locals[l] := retval;
+      SetValue(l, retval);
 end;
 
 procedure TrsExec.PCall(l, r: integer);
@@ -483,50 +523,62 @@ begin
 end;
 
 procedure TrsExec.ArrayLoad(l: integer);
+var
+   val: PValue;
 begin
-   if not (FContext.locals[l].IsArray) then
+   val := GetValue(l);
+   if not (val.IsArray) then
       CorruptError;
-   FContext.ar := @FContext.locals[l];
+   FContext.ar := val;
 end;
 
 procedure TrsExec.AssignIntToFloat(l: integer; r: integer);
 begin
-   FContext.locals[l] := FContext.locals[r].AsExtended;
+   SetValue(l, GetValue(r).AsExtended);
 end;
 
 procedure TrsExec.ArrayElemMove(l: integer; r: integer);
 begin
    if not (assigned(FContext.ar) and (FContext.ar.IsArray)) then
       CorruptError;
-   FContext.locals[l] := FContext.ar.GetArrayElement(r);
+   SetValue(l, FContext.ar.GetArrayElement(r));
 end;
 
 procedure TrsExec.ArrayElemAssignC(l: integer; r: integer);
 begin
    if not (assigned(FContext.ar) and (FContext.ar.IsArray)) then
       CorruptError;
-   FContext.ar.SetArrayElement(l, FContext.locals[r]);
+   FContext.ar.SetArrayElement(l, GetValue(r)^);
 end;
 
 procedure TrsExec.ArrayElemAssign(l: integer; r: integer);
+var
+   val: PValue;
 begin
-   if FContext.locals[l].kind <> tkInteger then
+   val := GetValue(l);
+   if val.kind <> tkInteger then
       CorruptError;
-   ArrayElemAssignC(FContext.locals[l].AsInteger, r);
+   ArrayElemAssignC(val.AsInteger, r);
 end;
 
 procedure TrsExec.LoadSelfRegister(l: integer);
+var
+   val: PValue;
 begin
-   if not (FContext.locals[l].IsObject) then
+   val := GetValue(l);
+   if not (val.IsObject) then
       CorruptError;
-   FsrStack.Push(TsrPair.Create(FContext.locals[l], FDepth));
+   FsrStack.Push(TsrPair.Create(val^, FDepth));
 end;
 
 procedure TrsExec.TruncReg(l, r: integer);
+var
+   val2: PValue;
 begin
-   if FContext.locals[r].Kind = tkInteger then
-      FContext.locals[l] := FContext.locals[r]
-   else FContext.locals[l] := trunc(FContext.locals[r].AsExtended);
+   val2 := GetValue(r);
+   if val2.Kind = tkInteger then
+      SetValue(l, val2^)
+   else SetValue(l, trunc(val2.AsExtended));
 end;
 
 function TrsExec.RunLoop(resultIndex: integer; expected: TrsOpcode): TValue;
@@ -735,13 +787,57 @@ begin
       FConstants[i] := DeserializeConstant(FProgram.Constants[i], pointer(FProgram.Constants.Objects[i]))
 end;
 
+procedure TrsExec.LoadGlobals;
+var
+   i: integer;
+   blank: TValue;
+begin
+   SetLength(FGlobals, FProgram.Globals.Count);
+   blank := TValue.Empty;
+   for i := 1 to High(FGlobals) do
+      FGlobals[i] := blank.Cast(pointer(FProgram.Globals.Objects[i]));
+   if assigned(FEnvironment) then
+   begin
+      if (length(FGlobals) < 2) or (FProgram.Globals[1] <> 'ENVIRONMENT*SELF') then
+         raise ErsRuntimeError.Create('No environment defined for this program')
+      else if (FGlobals[1].TypeInfo <> FEnvironment.ClassInfo) then
+         raise ErsRuntimeError.CreateFmt('Incorrect environment type for this program; expected %s but %s was loaded.', [FGlobals[1].TypeInfo.Name, FEnvironment.ClassName]);
+      FGlobals[1] := FEnvironment;
+   end;
+end;
+
+procedure TrsExec.LoadEnvironment;
+var
+   info: TrsProcInfo;
+   methods: TArray<TRttiMethod>;
+   method: TRttiMethod;
+   classdot: string;
+   i: integer;
+begin
+   if assigned(FEnvironment) then
+   begin
+      classdot := FEnvironment.ClassName + '.';
+      methods := TRttiContext.Create.GetType(FEnvironment.ClassInfo).GetMethods;
+      SetLength(FExtRoutines, length(methods));
+      for method in methods do
+         if FProgram.Routines.TryGetValue(classdot + UpperCase(method.Name), info) then
+         begin
+            i := min(i, info.index);
+            FExtRoutines[-info.index] := method;
+         end;
+      SetLength(FExtRoutines, succ(-i));
+   end;
+end;
+
 procedure TrsExec.Load(prog: TrsProgram);
 begin
    assert(FProgram = nil); //fix this after changing to interfaces
    FProgram := prog;
    FText := FProgram.Text;
+   LoadEnvironment;
    LoadProcs;
    LoadConstants;
+   LoadGlobals;
    if FRunOnLoad then
       Run;
 end;
@@ -795,6 +891,27 @@ begin
    if (FsrStack.Count = 0) or (FsrStack.Peek.Value <> FDepth) then
       CorruptError;
    result := FsrStack.Pop.Key;
+end;
+
+function TrsExec.GetValue(i: integer): PValue;
+begin
+   if i > 0 then
+      result := @FContext.locals[i]
+   else result := @FGlobals[-i];
+end;
+
+procedure TrsExec.SetEnvironment(value: TObject);
+begin
+   if assigned(FProgram) then
+      raise ErsRuntimeError.Create('Environment must be set before the script program is loaded.');
+   FEnvironment := value;
+end;
+
+procedure TrsExec.SetValue(i: integer; const val: TValue);
+begin
+   if i > 0 then
+      FContext.locals[i] := val
+   else FGlobals[-i] := val;
 end;
 
 function TrsExec.RunProc(const name: string; const params: array of TValue): TValue;

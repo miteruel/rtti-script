@@ -356,10 +356,18 @@ end;
 function TrsCodegen.WriteCall(value: TCallSyntax): TrsAsmInstruction;
 var
    param: TTypedSyntax;
+   left: Integer;
 begin
    WriteOp(OP_LIST, value.params.Count);
    for param in value.params do
       PushParam(param);
+   if assigned(value.SelfSymbol) then
+   begin
+      left := Eval(value.SelfSymbol);
+      if left = -1 then
+         PopUnres;
+      WriteOp(OP_SRLD, left);
+   end;
    result.op := OP_CALL;
    result.right := ResolveCall(value.proc.fullName, FCurrent.Text.Count);
    if assigned(value.proc.&Type) then
@@ -435,7 +443,7 @@ end;
 function TrsCodegen.WriteArrayPropRead(value: TArrayPropSyntax): TrsAsmInstruction;
 var
    base: TDotSyntax;
-   left, right: integer;
+   left: integer;
    param: TTypedSyntax;
 begin
    WriteOp(OP_LIST);
@@ -572,7 +580,7 @@ end;
 
 procedure TrsCodegen.AssignDot(lValue: TDotSyntax; rValue: integer);
 var
-   selfVal, dotVal: integer;
+   selfVal: integer;
 begin
    selfVal := eval(lValue.left);
    if selfVal = -1 then
@@ -848,7 +856,7 @@ begin
       end);
    try
       for pair in list do
-         rsu.Globals.AddObject(pair.Value.fullName, pair.Value)
+         rsu.Globals.AddObject(pair.Value.fullName, pointer(TVarSymbol(pair.Value).&Type.TypeInfo));
    finally
       list.free;
    end;

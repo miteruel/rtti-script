@@ -76,7 +76,7 @@ type
       FOnUses: TUseUnitFunc;
       FUseStack: TUseStack;
       FSysSetup: boolean;
-      FEnvironment: TObject;
+      FEnvironment: TClass;
       function ProcessUses(const name: string; out &unit: TUnitSymbol): boolean;
       function RecursiveCompile(const name: string; const text: string): TUnitSymbol;
       procedure RecursiveUsesPanic(const name: string);
@@ -97,7 +97,7 @@ type
       destructor Destroy; override;
       function Compile(const value: string): TrsProgram;
       procedure RegisterStandardUnit(const name: string; const proc: TrsCompilerRegisterProc);
-      procedure RegisterEnvironment(env: TObject);
+      procedure RegisterEnvironment(env: TClass);
       property OnUses: TUseUnitFunc read FOnUses write FOnUses;
    end;
 
@@ -362,7 +362,7 @@ begin
    end;
 end;
 
-procedure TrsCompiler.RegisterEnvironment(env: TObject);
+procedure TrsCompiler.RegisterEnvironment(env: TClass);
 begin
    EnsureSysUnit;
    if not NativeTypeDefined(TRttiContext.Create.GetType(env.ClassInfo)) then
