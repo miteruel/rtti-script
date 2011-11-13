@@ -3,9 +3,9 @@ program HelloEnvironment;
 uses
   Forms,
   main in 'main.pas' {frmHelloWorld},
-  rsCompiler in '..\..\rsCompiler.pas',
-  rsExec in '..\..\rsExec.pas',
-  rsDefsBackend in '..\..\rsDefsBackend.pas';
+  rsCompiler in '..\..\source\rsCompiler.pas',
+  rsDefsBackend in '..\..\source\rsDefsBackend.pas',
+  rsExec in '..\..\source\rsExec.pas';
 
 {$R *.res}
 
