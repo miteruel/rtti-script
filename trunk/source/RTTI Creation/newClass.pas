@@ -17,7 +17,15 @@
 *****************************************************************************}
 
 unit newClass;
-{$I jedi.inc} // sets up version defines
+
+// set up version defines
+{$IFNDEF NO_JCL}
+   {$I jedi.inc}
+{$ELSE}
+   {$IF CompilerVersion >= 21}
+      {$DEFINE DELPHI2010_UP}
+   {$IFEND}
+{$ENDIF}
 {$IFNDEF DELPHI2010_UP}
    {$MESSAGE FATAL This unit requires Delphi 2010 or later.}
 {$ENDIF}
@@ -119,8 +127,8 @@ function GetVirtualMethodCount(AClass: TClass): Integer;
 { ****************************************************************************** }
 implementation
 
-uses
 {$IFNDEF NO_JCL}
+uses
   JclSysUtils;
 {$ENDIF}
 
