@@ -181,6 +181,7 @@ begin
 
   result := buffer.GetBuffer(bufferLength);
   result.Len := buffer.size;
+  RegisterExpectedMemoryLeak(result);
 end;
 
 { TBuffer }
