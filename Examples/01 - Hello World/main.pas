@@ -68,6 +68,7 @@ begin
    finally
       compiler.Free;
       prog.Free;
+      exec.free;
    end;
 end;
 
