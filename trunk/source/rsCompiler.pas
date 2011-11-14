@@ -162,6 +162,7 @@ var
    proc: TProcSymbol;
 begin
    linker := nil;
+   result := nil;
    codegen := TrsCodegen.Create;
    try
       try
