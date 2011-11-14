@@ -126,7 +126,7 @@ begin
    FName := name;
    FUnits := TList<INewUnit>.Create;
    FHeap := TPrivateHeap.Create(0, false);
-   FNewClasses := TNewClassMap.Create;
+   FNewClasses := TNewClassMap.Create([doOwnsValues]);
 end;
 
 destructor TRttiPackage.Destroy;
