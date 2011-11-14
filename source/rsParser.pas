@@ -364,8 +364,6 @@ begin
 end;
 
 function TrsParser.SymbolLookup(const name: string; const namespace: ISymbolTable): TSymbol;
-var
-   ancestor: ISymbolTable;
 begin
    if namespace = nil then
       result := symbolLookup(name)
@@ -643,11 +641,9 @@ end;
 
 function ConstArrayFromArray(value: TArraySyntax; destType: PTypeInfo = nil): TValueSyntax;
 var
-   dyn: TRttiDynamicArrayType;
    vals: TArray<TValue>;
    i: integer;
    children: TSyntaxList;
-   child: TSyntax;
 begin
    if (destType = nil) then
       if value.&type.HasTypeInfo  then
@@ -693,6 +689,7 @@ end;
 
 function TrsParser.ReadFactor: TTypedSyntax;
 begin
+   result := nil;
    case FCurrent.kind of
       tkIdentifier:
       begin
@@ -854,7 +851,6 @@ procedure TrsParser.EvalArraySyntax(var value: TTypedSyntax; constOnly: boolean)
 var
    isConst: boolean;
    subscript: TSyntax;
-   aProp: TTypeSymbol;
    values: array of TValue;
    newVal: TValueSyntax;
    i: integer;
