@@ -71,6 +71,7 @@ type
       FConstants: array of TValue;
       FLastImport: TPair<string, TDictionary<string, pointer>>;
       FText: TArray<TrsAsmInstruction>;
+      FMaxStackDepth: integer;
 
       function GetProc(const name: string; count: integer): TRttiMethod;
       procedure CreateMethodPointer(method: TRttiMethod; var address: pointer);
@@ -152,6 +153,7 @@ type
       procedure SetEnvironment(value: TObject);
 
       property RunOnLoad: boolean read FRunOnLoad write FRunOnLoad;
+      property MaxStackDepth: integer read FMaxStackDepth write FMaxStackDepth;
    end;
 
    ErsRuntimeError = class(Exception);
@@ -190,6 +192,7 @@ begin
    FExtUnits := TDictionary<string, TrsExecImportProc>.Create;
    FStack := TStack<TVmContext>.Create;
    FsrStack := TStack<TsrPair>.Create;
+   FMaxStackDepth := 2048;
 end;
 
 destructor TrsExec.Destroy;
@@ -685,6 +688,8 @@ end;
 function TrsExec.InvokeCode(index: integer; const Args: TArray<TValue>): TValue;
 begin
    inc(FDepth);
+   if FDepth > FMaxStackDepth then
+      raise ErsRuntimeError.CreateFmt('Script executor stack overflow at a depth of %d frames', [FDepth]);
    try
       FContext.ip := index;
       InitializeRegs(FProgram.Text[FContext.ip], args);
