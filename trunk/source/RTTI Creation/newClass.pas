@@ -18,17 +18,9 @@
 
 unit newClass;
 
-// set up version defines
-{$IFNDEF NO_JCL}
-   {$I jedi.inc}
-{$ELSE}
-   {$IF CompilerVersion >= 21}
-      {$DEFINE DELPHI2010_UP}
-   {$IFEND}
-{$ENDIF}
-{$IFNDEF DELPHI2010_UP}
-   {$MESSAGE FATAL This unit requires Delphi 2010 or later.}
-{$ENDIF}
+{$IF CompilerVersion < 21}
+   {$MESSAGE FATAL 'This unit requires Delphi 2010 or later.'}
+{$IFEND}
 
 interface
 
@@ -119,21 +111,10 @@ type
 const
   VMT_SIZE = sizeof(TVmt) div sizeof(pointer);
 
-  // function UserDefinedVirtualCount(value: TClass): cardinal;
-{$IFDEF NO_JCL}
 function GetVirtualMethodCount(AClass: TClass): Integer;
-{$ENDIF}
 
 { ****************************************************************************** }
 implementation
-
-{$IFNDEF NO_JCL}
-uses
-  JclSysUtils;
-{$ENDIF}
-
-
-{$IFDEF NO_JCL}
 
 function GetVirtualMethodCount(AClass: TClass): Integer;
 var
@@ -162,7 +143,6 @@ begin
 
   Result := (EndVMT - BeginVMT) div sizeof(pointer);
 end;
-{$ENDIF}
 
 { TNewClass }
 
@@ -381,7 +361,6 @@ var
   nullPtr: pointer;
   i: integer;
 begin
-  {$IFDEF DELPHI2010_UP}
   if FNewFields.Count > 0 then
   begin
     result := buffer.size;
@@ -392,7 +371,7 @@ begin
     for I := 0 to FNewFields.Count - 1 do
       buffer.add(FNewFields[i].FData^, FNewFields[i].FTypeDataSize);
   end
-  else {$ENDIF} result := 0;
+  else result := 0;
 end;
 
 function TNewClass.PrepareNewMethods(const buffer: IBuffer): integer;
@@ -401,7 +380,6 @@ var
   offsets: array of integer;
   offset: nativeInt;
 begin
-  {$IFDEF DELPHI2010_UP}
   if FNewMethods.Count > 0 then
   begin
     setLength(offsets, FNewMethods.Count);
@@ -421,7 +399,7 @@ begin
       buffer.add(FNewMethods[i].FIndex, sizeof(smallint));
     end;
   end
-  else {$ENDIF} result := 0;
+  else result := 0;
 end;
 
 procedure TNewClass.FixMethodRtti(overlay: PVmt; offset: integer);
@@ -492,11 +470,7 @@ begin
   nameOffset := buffer.size;
 
   // place class name pointer at the end of the list
-{$IFDEF DELPHI2009_UP}
   name := UTF8EncodeToShortString(FClassName);
-{$ELSE}
-  name := shortString(FClassName);
-{$ENDIF}
   buffer.add(name, length(name) + 1);
 
   typeOffset := vmtBuilder.CreateClassInfo(FClassname, FParent, 0, buffer);
@@ -522,10 +496,8 @@ begin
   overlay.InstanceSize := overlayParent.InstanceSize + FExtraInstanceSize;
   overlay.TypeInfo := pointer(nativeInt(overlay) + typeOffset);
   overlay.parent := @overlayParent.SelfPtr;
-{$IFDEF DELPHI2006_UP}
   // keep FastMM from complaining about all this garbage
   RegisterExpectedMemoryLeak(newVMT);
-{$ENDIF}
   nativeInt(result) := nativeInt(overlay) + sizeof(TVmt);
   getTypeData(overlay.TypeInfo).ClassType := pointer(result);
   FClassPtr := result;
@@ -555,9 +527,7 @@ end;
 function TNewClass.offset: Integer;
 begin
   Result := FParent.InstanceSize + integer(FExtraInstanceSize);
-{$IFDEF DELPHI2009_UP}
   dec(Result, sizeof(pointer)); //compensate for TMonitor pointer
-{$ENDIF}
 end;
 
 { TNewField }

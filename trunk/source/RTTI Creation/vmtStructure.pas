@@ -18,17 +18,9 @@
 
 unit vmtStructure;
 
-// set up version defines
-{$IFNDEF NO_JCL}
-   {$I jedi.inc}
-{$ELSE}
-   {$IF CompilerVersion >= 21}
-      {$DEFINE DELPHI2010_UP}
-   {$IFEND}
-{$ENDIF}
-{$IFNDEF DELPHI2010_UP}
-   {$MESSAGE FATAL This unit requires Delphi 2010 or later.}
-{$ENDIF}
+{$IF CompilerVersion < 21}
+   {$MESSAGE FATAL 'This unit requires Delphi 2010 or later.'}
+{$IFEND}
 
 interface
 uses
