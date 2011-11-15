@@ -531,7 +531,7 @@ begin
          syVariable, syProp:
          begin
             result := TVariableSyntax.Create(TVarSymbol(symbol));
-            if FLastSelf = FEnvironmentSymbol then
+            if assigned(FEnvironmentSymbol) and (FLastSelf = FEnvironmentSymbol) then
             begin
                result := TDotSyntax.Create(TVariableSyntax.Create(FLastSelf), TTypedSyntax(result));
                FLastSelf := nil;

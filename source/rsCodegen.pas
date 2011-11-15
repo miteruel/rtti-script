@@ -88,6 +88,7 @@ type
       procedure CreateUnitClass(&unit: TUnitSymbol);
       procedure ResolveJumps;
       procedure ChangeLeftValue(index, value: integer);
+      procedure ChangeRightValue(index, value: integer);
       function ResolveCall(const name: string; position: integer): integer;
       procedure ResolveUnitLocalCalls(&unit: TUnitSymbol);
       procedure SetupUnitGlobals(&unit: TUnitSymbol; rsu: TrsScriptUnit);
@@ -727,6 +728,15 @@ begin
    FCurrent.Text[index] := op;
 end;
 
+procedure TrsCodegen.ChangeRightValue(index, value: integer);
+var
+   op: TrsAsmInstruction;
+begin
+   op := FCurrent.Text[index];
+   op.right:= value;
+   FCurrent.Text[index] := op;
+end;
+
 procedure TrsCodegen.ResolveJumps;
 var
    pair: TPair<string, integer>;
@@ -837,8 +847,8 @@ begin
       ref := table[i];
       begin
          left := ResolveCall(ref.name, ref.location);
-         assert(left >= 0);
-         ChangeLeftValue(ref.location, left);
+         assert(left <> -1);
+         ChangeRightValue(ref.location, left);
       end;
    end;
    table.Clear;

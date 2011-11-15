@@ -470,10 +470,10 @@ begin
    FParamLists.Pop;
    FStack.Push(FContext);
    retval := InvokeCode(FContext.ip + r, args);
+   FContext := FStack.Pop;
    //TODO: this will break if a function returns nil. Hooray for the semipredicate problem!  Fix this.
    if not retval.IsEmpty then
       SetValue(l, retval);
-   FContext := FStack.Pop;
 end;
 
 procedure TrsExec.Callx(l, r: integer);
