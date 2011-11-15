@@ -1,7 +1,6 @@
 program Ackermann;
 
 uses
-  FastMM4,
   Forms,
   main in 'main.pas' {frmAckermann};
 
