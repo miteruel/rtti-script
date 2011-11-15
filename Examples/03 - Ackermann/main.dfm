@@ -28,7 +28,7 @@ object frmAckermann: TfrmAckermann
     Top = 176
     Width = 121
     Height = 26
-    MaxValue = 0
+    MaxValue = 5
     MinValue = 0
     TabOrder = 1
     Value = 0
