@@ -795,6 +795,7 @@ end;
 
 constructor TVariableSyntax.Create(symbol: TVarSymbol);
 begin
+   assert(assigned(symbol));
    inherited Create(skVariable);
    FSymbol := symbol;
 end;
