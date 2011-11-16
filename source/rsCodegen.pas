@@ -215,7 +215,7 @@ begin
    if result.right = -1 then
       popUnres;
    result.op := OPCODES[value.op];
-   if (result.op = OP_ADD) and (value.left.&type.TypeInfo.Kind in [tkWString, tkWChar]) then
+   if (result.op = OP_ADD) and (value.left.&type.TypeInfo.Kind in [tkUString, tkWString, tkWChar]) then
       result.op := OP_SCAT;
 end;
 

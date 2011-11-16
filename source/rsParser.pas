@@ -828,7 +828,7 @@ function TrsParser.CombineStrings(const left, right: string; op: TBinOpKind): TV
 begin
    if op = opPlus then
       result := left + right
-   else Abort;
+   else raise EParseError.Create('Invalid operation');
 end;
 
 function TrsParser.CombineValues(const left, right: TValue; op: TBinOpKind): TValueSyntax;
@@ -839,7 +839,7 @@ begin
       val := CombineInts(left.AsInteger, right.AsInteger, op)
    else if (left.Kind in [tkInteger, typInfo.tkFloat]) and (right.Kind in [tkInteger, typInfo.tkFloat]) then
       val := CombineFloats(left.AsExtended, right.AsExtended, op)
-   else if (left.Kind in [tkWChar, tkWString]) and (right.Kind in [tkWChar, tkWString]) then
+   else if (left.Kind in [tkWChar, tkUString, tkWString]) and (right.Kind in [tkWChar, tkUString, tkWString]) then
       val := CombineStrings(left.AsString, right.AsString, op)
    else if (left.TypeInfo = TypeInfo(boolean)) and (right.TypeInfo = TypeInfo(boolean)) then
       val := CombineBools(left.AsBoolean, right.AsBoolean, op)
@@ -1617,6 +1617,7 @@ end;
 
 function TrsParser.ParseCall(sym: TProcSymbol; selfSymbol: TVarSymbol): TCallSyntax;
 var
+   param: TTypedSyntax;
    params: TObjectList<TTypedSyntax>;
 begin
    Next; //skip function name
@@ -1625,7 +1626,9 @@ begin
    try
       if Check(tkOpenParen) and not Check(tkCloseParen) then
          repeat
-            params.Add(ReadExpression)
+            param := ReadExpression;
+            EvalExpression(param, false);
+            params.Add(param)
          until Expect([tkCloseParen, tkComma]) = tkCloseParen;
       if assigned(selfSymbol) then
          params.Insert(0, TVariableSyntax.Create(selfSymbol));
