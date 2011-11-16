@@ -104,13 +104,21 @@ type
       procedure XorRegs(l, r: integer);
       procedure ShlRegs(l, r: integer);
       procedure ShrRegs(l, r: integer);
+      procedure DivInt(l, r: integer);
+      procedure MulInt(l, r: integer);
+      procedure ModInt(l, r: integer);
+      procedure AndInt(l, r: integer);
+      procedure OrInt(l, r: integer);
+      procedure XorInt(l, r: integer);
+      procedure ShlInt(l, r: integer);
+      procedure ShrInt(l, r: integer);
       procedure MovRegs(l, r: integer);
       procedure MovConst(l, r: integer);
       procedure MovInt(l, r: integer);
       procedure NegRegister(l, r: integer);
       procedure NotRegister(l, r: integer);
-      procedure IncRegister(l: integer);
-      procedure DecRegister(l: integer);
+      procedure IncRegister(l, r: integer);
+      procedure DecRegister(l, r: integer);
       procedure CompGte(l, r: integer);
       procedure CompLte(l, r: integer);
       procedure CompGt(l, r: integer);
@@ -215,8 +223,8 @@ var
 begin
    val := GetValue(l);
    case val.Kind of
-      tkInteger: SetValue(l, val.AsInteger + GetValue(r).AsInteger);
-      tkFloat: SetValue(l, val.AsExtended + GetValue(r).AsExtended);
+      tkInteger: val^ := val.AsInteger + GetValue(r).AsInteger;
+      tkFloat: val^ := val.AsExtended + GetValue(r).AsExtended;
       else CorruptError;
    end;
 end;
@@ -227,8 +235,8 @@ var
 begin
    val := GetValue(l);
    case val.Kind of
-      tkInteger: SetValue(l, val.AsInteger - GetValue(r).AsInteger);
-      tkFloat: SetValue(l, val.AsExtended - GetValue(r).AsExtended);
+      tkInteger: val^ := val.AsInteger - GetValue(r).AsInteger;
+      tkFloat: val^ := val.AsExtended - GetValue(r).AsExtended;
       else CorruptError;
    end;
 end;
@@ -240,53 +248,144 @@ begin
    val := GetValue(l);
    val2 := GetValue(r);
    if (val.Kind = tkInteger) and (val2.Kind = tkInteger) then
-      SetValue(l, val.AsInteger * val2.AsInteger)
-   else SetValue(l, val.AsExtended * val2.AsExtended)
+      val^ := val.AsInteger * val2.AsInteger
+   else val^ := val.AsExtended * val2.AsExtended
 end;
 
 procedure TrsExec.DivRegs(l, r: integer);
+var
+   val: PValue;
 begin
-   SetValue(l, GetValue(l).AsInteger div GetValue(r).AsInteger);
+   val := GetValue(l);
+   val^ := val.AsInteger div GetValue(r).AsInteger;
 end;
 
 procedure TrsExec.FdivRegs(l, r: integer);
+var
+   val: PValue;
 begin
-   SetValue(l, GetValue(l).AsExtended / GetValue(r).AsExtended)
+   val := GetValue(l);
+   val^ := val.AsExtended / GetValue(r).AsExtended;
 end;
 
 procedure TrsExec.ModRegs(l, r: integer);
+var
+   val: PValue;
 begin
-   FContext.locals[l] := FContext.locals[l].AsInteger mod FContext.locals[r].AsInteger
+   val := GetValue(l);
+   val^ := val.AsInteger mod GetValue(r).AsInteger;
 end;
 
 procedure TrsExec.AndRegs(l, r: integer);
+var
+   val: PValue;
 begin
-   SetValue(l, GetValue(l).AsInteger mod GetValue(r).AsInteger);
+   val := GetValue(l);
+   val^ := val.AsInteger and GetValue(r).AsInteger;
 end;
 
 procedure TrsExec.OrRegs(l, r: integer);
+var
+   val: PValue;
 begin
-   SetValue(l, GetValue(l).AsInteger or GetValue(r).AsInteger);
+   val := GetValue(l);
+   val^ := val.AsInteger or GetValue(r).AsInteger;
 end;
 
 procedure TrsExec.XorRegs(l, r: integer);
+var
+   val: PValue;
 begin
-   SetValue(l, GetValue(l).AsInteger xor GetValue(r).AsInteger);
+   val := GetValue(l);
+   val^ := val.AsInteger xor GetValue(r).AsInteger;
 end;
 
 procedure TrsExec.ShlRegs(l, r: integer);
+var
+   val: PValue;
 begin
-   SetValue(l, GetValue(l).AsInteger shl GetValue(r).AsInteger);
+   val := GetValue(l);
+   val^ := val.AsInteger shl GetValue(r).AsInteger;
 end;
 
 procedure TrsExec.ShrRegs(l, r: integer);
+var
+   val: PValue;
 begin
-   SetValue(l, GetValue(l).AsInteger shr GetValue(r).AsInteger);
+   val := GetValue(l);
+   val^ := val.AsInteger shr GetValue(r).AsInteger;
 end;
 
 procedure TrsExec.StringConcat(l, r: integer);
+var
+   val: PValue;
 begin
-   SetValue(l, GetValue(l).AsString + GetValue(r).AsString);
+   val := GetValue(l);
+   val^ := val.AsString + GetValue(r).AsString;
+end;
+
+procedure TrsExec.MulInt(l, r: integer);
+var
+   val: PValue;
+begin
+   val := GetValue(l);
+   val^ := val.AsInteger * r;
+end;
+
+procedure TrsExec.DivInt(l, r: integer);
+var
+   val: PValue;
+begin
+   val := GetValue(l);
+   val^ := val.AsInteger div r;
+end;
+
+procedure TrsExec.ModInt(l, r: integer);
+var
+   val: PValue;
+begin
+   val := GetValue(l);
+   val^ := val.AsInteger mod r;
+end;
+
+procedure TrsExec.AndInt(l, r: integer);
+var
+   val: PValue;
+begin
+   val := GetValue(l);
+   val^ := val.AsInteger and r;
+end;
+
+procedure TrsExec.OrInt(l, r: integer);
+var
+   val: PValue;
+begin
+   val := GetValue(l);
+   val^ := val.AsInteger or r;
+end;
+
+procedure TrsExec.XorInt(l, r: integer);
+var
+   val: PValue;
+begin
+   val := GetValue(l);
+   val^ := val.AsInteger xor r;
+end;
+
+procedure TrsExec.ShlInt(l, r: integer);
+var
+   val: PValue;
+begin
+   val := GetValue(l);
+   val^ := val.AsInteger shl r;
+end;
+
+procedure TrsExec.ShrInt(l, r: integer);
+var
+   val: PValue;
+begin
+   val := GetValue(l);
+   val^ := val.AsInteger shr r;
 end;
 
 procedure TrsExec.MovRegs(l, r: integer);
@@ -326,20 +425,20 @@ begin
    end;
 end;
 
-procedure TrsExec.IncRegister(l: integer);
+procedure TrsExec.IncRegister(l, r: integer);
 var
    val: PValue;
 begin
    val := GetValue(l);
-   val^ := val.AsInteger + 1;
+   val^ := val.AsInteger + r;
 end;
 
-procedure TrsExec.DecRegister(l: integer);
+procedure TrsExec.DecRegister(l, r: integer);
 var
    val: PValue;
 begin
    val := GetValue(l);
-   val^ := val.AsInteger - 1;
+   val^ := val.AsInteger - r;
 end;
 
 procedure TrsExec.CompGte(l, r: integer);
@@ -606,6 +705,15 @@ begin
          OP_SHR:  ShrRegs(op.left, op.right);
          OP_AS:   NotImplemented;
          OP_SCAT: StringConcat(op.left, op.right);
+         OP_MULI: MulInt(op.left, op.right);
+         OP_DIVI: DivInt(op.left, op.right);
+         OP_MODI: ModInt(op.left, op.right);
+         OP_ANDI: AndInt(op.left, op.right);
+         OP_ORI:  OrInt(op.left, op.right);
+         OP_XORI: XorInt(op.left, op.right);
+         OP_SHLI: ShlInt(op.left, op.right);
+         OP_SHRI: ShrInt(op.left, op.right);
+
          OP_MOV:  MovRegs(op.left, op.right);
          OP_MOVC: MovConst(op.left, op.right);
          OP_MOVI: MovInt(op.left, op.right);
@@ -613,8 +721,8 @@ begin
          OP_MOVP: NotImplemented;
          OP_NEG:  NegRegister(op.left, op.right);
          OP_NOT:  NotRegister(op.left, op.right);
-         OP_INC:  IncRegister(op.left);
-         OP_DEC:  DecRegister(op.left);
+         OP_INC:  IncRegister(op.left, op.right);
+         OP_DEC:  DecRegister(op.left, op.right);
          OP_GTE:  CompGte(op.left, op.right);
          OP_LTE:  CompLte(op.left, op.right);
          OP_GT:   CompGt(op.left, op.right);

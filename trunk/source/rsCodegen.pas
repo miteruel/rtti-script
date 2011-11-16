@@ -57,6 +57,7 @@ type
 
       function Eval(value: TTypedSyntax): integer;
       function WriteBinCalc(value: TBinOpSyntax): TrsAsmInstruction;
+      function WriteIntBinCalc(value: TBinOpSyntax): TrsAsmInstruction;
       procedure ProcessProc(proc: TProcSymbol);
       function WriteConst(value: TValueSyntax): TrsAsmInstruction;
       function WriteUnCalc(value: TUnOpSyntax): TrsAsmInstruction;
@@ -194,12 +195,38 @@ begin
    end;
 end;
 
+function TrsCodegen.WriteIntBinCalc(value: TBinOpSyntax): TrsAsmInstruction;
+const OPCODES: array[TBinOpKind] of TrsOpcode =
+  (OP_INC, OP_DEC, OP_MULI, OP_DIVI, OP_NOP, OP_MODI, OP_ANDI, OP_ORI, OP_XORI, OP_SHLI, OP_SHRI, OP_NOP);
+var
+   left, new: integer;
+begin
+   left := Eval(value.left);
+   if left = -1 then
+      popUnres;
+   if left > FLocals.Count then
+      result.left := left
+   else begin
+      new := NextReg(value.sem);
+      WriteOp(OP_MOV, new, left);
+      result.left := new;
+   end;
+   result.right := (value.right as TValueSyntax).value.AsInteger;
+   result.op := OPCODES[value.op];
+   assert(result.op <> OP_NOP);
+end;
+
 function TrsCodegen.WriteBinCalc(value: TBinOpSyntax): TrsAsmInstruction;
 const OPCODES: array[TBinOpKind] of TrsOpcode =
   (OP_ADD, OP_SUB, OP_MUL, OP_DIV, OP_FDIV, OP_MOD, OP_AND, OP_OR, OP_XOR, OP_SHL, OP_SHR, OP_AS);
 var
    left, new: integer;
 begin
+   if not (value.op in [opDivide, opAs]) and (value.right.kind = skValue)
+      and (TValueSyntax(value.right).value.Kind = tkInteger)
+      and (value.left.&type.TypeInfo.Kind = tkInteger) then
+      Exit(WriteIntBinCalc(value));
+
    result.right := Eval(value.right);
 
    left := Eval(value.left);
