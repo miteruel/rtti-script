@@ -199,7 +199,7 @@ var
    name: string;
    units: TUnitList;
 begin
-OutputDebugString('SAMPLING ON');
+//OutputDebugString('SAMPLING ON');
    if assigned(FUseStack) and (FUseStack.Count > 0) then
       name := FUseStack.Peek
    else name := '';
@@ -209,7 +209,6 @@ OutputDebugString('SAMPLING ON');
    units := TUnitList.Create;
    units.OwnsObjects := true;
    try
-//      symbol := FParser.Parse(FLexer.Lex(value), name);
       symbol := FParser.Parse(value, name);
       if FUnitCache.ContainsKey(symbol.name) then
          FUnitList.Remove(FUnitCache[symbol.name]);
@@ -223,7 +222,7 @@ OutputDebugString('SAMPLING ON');
       if name = '' then
          Reset;
    end;
-OutputDebugString('SAMPLING OFF');
+//OutputDebugString('SAMPLING OFF');
 end;
 
 procedure TrsCompiler.AddType(info: PTypeInfo; parent: TUnitSymbol);
