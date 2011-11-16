@@ -976,7 +976,7 @@ begin
    Next;
    expect(tkEquals); //TODO: Implement typed constants
    value := ReadConst;
-   AddSymbol(name, TConstSymbol.Create(name, (value as TValueSyntax).value));
+   AddSymbol(UpperCase(name), TConstSymbol.Create(name, (value as TValueSyntax).value));
    value.Free;
 end;
 
