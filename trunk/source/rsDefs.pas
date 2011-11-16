@@ -1658,6 +1658,9 @@ procedure CheckCompatibleTypes(left, right: TTypeSymbol; exact: boolean);
 var
    good: boolean;
 begin
+   assert(assigned(left));
+   if right = nil then
+      raise EParseError.CreateFmt('Incompatible types: "%s" and "Procedure or untyped value"', [left.name]);
    good := false;
    if left = right then
       good := true
