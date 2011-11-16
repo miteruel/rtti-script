@@ -40,6 +40,16 @@ type
       OP_SHR,  //shr operator
       OP_AS,   //as operator
       OP_SCAT, //string concatenation
+      //arithmetic operations with a constant integer as the R param
+      OP_MULI,
+      OP_DIVI,
+      OP_MODI,
+      OP_ANDI,
+      OP_ORI,
+      OP_XORI,
+      OP_SHLI,
+      OP_SHRI,
+
       OP_MOV,  //load value into register
       OP_MOVC, //mov constant
       OP_MOVI, //mov integer
