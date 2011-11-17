@@ -737,6 +737,8 @@ begin
    result := ReadTerm;
    while FCurrent.kind in [tkPlus, tkMinus, tkOr, tkXor] do
    try
+      if result.&type = BooleanType then
+         Break;
       op := TokenToBinOp;
       result := TBinOpSyntax.Create(op, result, ReadTerm);
       TBinOpSyntax(result).left.sem := FSemCount;
@@ -749,13 +751,20 @@ end;
 function TrsParser.ReadExpression: TTypedSyntax;
 var
    op: TBoolOpKind;
+   sub: TTypedSyntax;
 begin
    result := ReadSubExpression;
    while FCurrent.kind in [tkGreaterEqual, tkLessEqual, tkGreaterThan, tkLessThan,
                            tkEquals, tkNotEqual, tkIn, tkIs, tkAnd, tkOr, tkXor] do
    try
       op := TokenToBoolOp;
-      result := TBoolOpSyntax.Create(op, result, ReadSubExpression);
+      sub := ReadSubExpression;
+      if (op in [opBoolAnd..opBoolXor]) and not ((result.&type = BooleanType) and (sub.&type = BooleanType)) then
+      begin
+         sub.Free;
+         raise EParseError.Create('Boolean expression required');
+      end;
+      result := TBoolOpSyntax.Create(op, result, sub);
       TBoolOpSyntax(result).left.sem := FSemCount;
    except
       result.Free;
