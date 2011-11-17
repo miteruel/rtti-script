@@ -173,7 +173,7 @@ uses
    vmtStructure;
 
 var
-   ctx: TRttiContext;
+   PascalFormatSettings: TFormatSettings;
 
 procedure CorruptError;
 begin
@@ -496,33 +496,57 @@ begin
 end;
 
 procedure TrsExec.CompGtei(l, r: integer);
+var
+   val: PValue;
 begin
-   FContext.br := GetValue(l).AsInteger >= r;
+   val := GetValue(l);
+   case val.Kind of
+      tkInteger: FContext.br := val.AsInteger >= r;
+      tkFloat: FContext.br := val.AsExtended >= r;
+      else CorruptError;
+   end;
 end;
 
 procedure TrsExec.CompLtei(l, r: integer);
+var
+   val: PValue;
 begin
-   FContext.br := GetValue(l).AsInteger <= r;
+   val := GetValue(l);
+   case val.Kind of
+      tkInteger: FContext.br := val.AsInteger <= r;
+      tkFloat: FContext.br := val.AsExtended <= r;
+      else CorruptError;
+   end;
 end;
 
 procedure TrsExec.CompGti(l, r: integer);
 begin
-   FContext.br := GetValue(l).AsInteger > r;
+   CompLtei(l, r);
+   FContext.br := not FContext.br;
 end;
 
 procedure TrsExec.CompLti(l, r: integer);
 begin
-   FContext.br := GetValue(l).AsInteger < r;
+   CompGtei(l, r);
+   FContext.br := not FContext.br;
 end;
 
 procedure TrsExec.CompEqi(l, r: integer);
+var
+   val: PValue;
 begin
-   FContext.br := GetValue(l).AsInteger = r;
+   val := GetValue(l);
+   case val.Kind of
+      tkInteger: FContext.br := val.AsInteger = r;
+      tkFloat: FContext.br := val.AsExtended = r;
+      else CorruptError;
+   end;
 end;
 
 procedure TrsExec.CompNeqi(l, r: integer);
 begin
-   FContext.br := GetValue(l).AsInteger <> r;
+   CompEqi(l, r);
+   FContext.br := not FContext.br;
 end;
 
 procedure TrsExec.CompNeq(l, r: integer);
@@ -887,6 +911,8 @@ procedure TrsExec.LoadConstants;
        tkInt64: result := StrToInt64(value);
        tkUString, tkString, tkWString, tkChar, tkWChar: result := value;
        tkFloat: result := StrToFloat(value);
+{Not ready for this yet; requires support in codegen first}
+//       tkFloat: result := StrToFloat(value, PascalFormatSettings);
        tkSet: TValue.Make(StringToSet(info, value), info, result);
        else raise Exception.Create('Unknown constant type');
      end;
@@ -1062,4 +1088,7 @@ begin
    inc(FCount);
 end;
 
+initialization
+   PascalFormatSettings := FormatSettings;
+   PascalFormatSettings.DecimalSeparator := '.';
 end.
