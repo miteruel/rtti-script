@@ -611,6 +611,9 @@ uses
    SyncObjs,
    rsEnex;
 
+var
+   ParserFormatSettings: TFormatSettings;
+
 //minor hack
 type real = extended;
 
@@ -666,7 +669,7 @@ constructor TValueSyntax.Create(const value: TToken);
 begin
    case value.kind of
       tkInt: Create(StrToInt(value.GetText));
-      tkFloat: Create(TValue.From<Real>(StrToFloat(value.GetText)));
+      tkFloat: Create(TValue.From<Real>(StrToFloat(value.GetText, ParserFormatSettings)));
       tkChar, tkString: Create(value.GetText);
       else assert(false);
    end;
@@ -1983,6 +1986,8 @@ initialization
    LArrayTypeTable := TDictionary<string, TTypeSymbol>.Create();
    Sync := TMultiReadExclusiveWriteSynchronizer.Create;
    LFreeList := TObjectList<TTypeSymbol>.Create(true);
+   ParserFormatSettings := FormatSettings;
+   ParserFormatSettings.DecimalSeparator := '.';
 finalization
    Sync.Free;
    lKeywords.Free;
