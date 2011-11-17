@@ -1919,8 +1919,12 @@ begin
       breakTo := NewBranch;
       continueTo := NewBranch;
       result.Add(TLabelSyntax.Create(continueTo));
+      while check(tkSem) do ;
       while not check(tkUntil) do
+      begin
          result.add(ReadLineOrBlock(breakTo, continueTo, exitTo));
+         while check(tkSem) do ;
+      end;
       cond := ReadExpression;
       EvalExpression(cond, false);
       CheckBooleanCondition(cond);
