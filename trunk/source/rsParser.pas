@@ -514,8 +514,7 @@ end;
 
 function TrsParser.ReadTypeIdentifier: TTypedSyntax;
 begin
-   result := nil;
-   assert(false); //TODO: Implement this
+   raise EParseError.Create('Class and type references are not implemented yet.'); //TODO: Implement this
 end;
 
 function TrsParser.ReadSubIdentifier: TSyntax;
