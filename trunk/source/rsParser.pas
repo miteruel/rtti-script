@@ -2349,9 +2349,10 @@ begin
          else raise EParseError.CreateFmt('Unknown token: %s', [FCurrent.origText]);
       end;
    except
-      on EParseError do
+      on E: Exception do
       begin
-         raise; //TODO: make this show an error later
+         E.Message := format('Parse error: [%s] at line %d, column %d', [E.Message, FCurrent.row, FCurrent.Column]);
+         raise;
       end;
    end;
 //OutputDebugString('SAMPLING OFF');
