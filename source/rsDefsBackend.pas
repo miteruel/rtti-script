@@ -109,6 +109,7 @@ type
       OP_TRNC //Intrinsic TRUNC
    );
 
+   PrsAsmInstruction = ^TrsAsmInstruction;
    TrsAsmInstruction = record
       op: TrsOpcode;
       left, right: integer;
@@ -184,6 +185,7 @@ type
    end;
 
    PValue = ^TValue;
+   PValueData = ^TValueData;
 
    TUnitList = class(TObjectList<TrsScriptUnit>);
 
