@@ -689,10 +689,14 @@ end;
 
 constructor TBinOpSyntax.Create(op: TBinOpKind; left, right: TTypedSyntax);
 begin
-   inherited Create(skBinOp);
-   FOp := op;
-   FLeft := left;
-   FRight := right;
+   if (left.kind = skValue) and (right.kind <> skValue) then
+      Create(op, right, left)
+   else begin
+      inherited Create(skBinOp);
+      FOp := op;
+      FLeft := left;
+      FRight := right;
+   end;
 end;
 
 destructor TBinOpSyntax.Destroy;
@@ -711,10 +715,14 @@ end;
 
 constructor TBoolOpSyntax.Create(op: TBoolOpKind; left, right: TTypedSyntax);
 begin
-   inherited Create(skBoolOp);
-   FOp := op;
-   FLeft := left;
-   FRight := right;
+   if (left.kind = skValue) and (right.kind <> skValue) then
+      Create(op, right, left)
+   else begin
+      inherited Create(skBoolOp);
+      FOp := op;
+      FLeft := left;
+      FRight := right;
+   end;
 end;
 
 destructor TBoolOpSyntax.Destroy;
