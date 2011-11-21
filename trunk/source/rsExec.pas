@@ -20,7 +20,7 @@ unit rsExec;
 
 interface
 uses
-   SysUtils, RTTI, PrivateHeap, Generics.Collections,
+   SysUtils, TypInfo, RTTI, PrivateHeap, Generics.Collections,
    newClass, rsDefsBackend;
 
 type
@@ -35,7 +35,7 @@ type
          locals: array of TValue;
          ar: PValue;  //array reg
          br: boolean; //bool reg
-         ip: integer; //instruction pointer
+         ip: PrsAsmInstruction; //instruction pointer
       end;
 
       TsrPair = TPair<TValue, integer>;
@@ -72,6 +72,8 @@ type
       FLastImport: TPair<string, TDictionary<string, pointer>>;
       FText: TArray<TrsAsmInstruction>;
       FMaxStackDepth: integer;
+      FBlank: TValue;
+      FBlankData: IValueData;
 
       function GetProc(const name: string; count: integer): TRttiMethod;
       procedure CreateMethodPointer(method: TRttiMethod; var address: pointer);
@@ -90,8 +92,12 @@ type
       function DoImport(const unitName: string): TDictionary<string, pointer>;
 
       function GetValue(i: integer): PValue;
-      procedure SetValue(i: integer; const val: TValue);
+      procedure SetValue(i: integer; const val: TValue); overload;
+      procedure SetValue(i: integer; const val: integer); overload;
+      procedure SetValue(i: integer; const val: Extended); overload;
       function GetSR: TValue;
+      procedure InitializeReg(value: PValue; info: PTypeInfo);
+      function GetIP: integer;
 
       procedure AddRegs(l, r: integer);
       procedure SubRegs(l, r: integer);
@@ -168,7 +174,7 @@ type
 
 implementation
 uses
-   StrUtils, Types, TypInfo, Math, //Windows,
+   StrUtils, Types, Math, //Windows,
    rsEnex,
    vmtStructure;
 
@@ -185,10 +191,12 @@ begin
    raise ErsRuntimeError.Create('Not Implemented Error');
 end;
 
-{$q+}{$r+}
+{$q+}{$r+}{$o+}
 { TrsExec }
 
 constructor TrsExec.Create;
+var
+   notBlank: TValue;
 begin
    FHeap := TPrivateHeap.Create;
    FProcMap := TMultimap<string, TRttiMethod>.Create;
@@ -201,6 +209,9 @@ begin
    FStack := TStack<TVmContext>.Create;
    FsrStack := TStack<TsrPair>.Create;
    FMaxStackDepth := 2048;
+   FBlank := TValue.Empty;
+   notBlank := FBlank.Cast<integer>;
+   FBlankData := TValueData(notBlank).FValueData;
 end;
 
 destructor TrsExec.Destroy;
@@ -223,8 +234,8 @@ var
 begin
    val := GetValue(l);
    case val.Kind of
-      tkInteger: val^ := val.AsInteger + GetValue(r).AsInteger;
-      tkFloat: val^ := val.AsExtended + GetValue(r).AsExtended;
+      tkInteger: SetValue(l, val.AsInteger + GetValue(r).AsInteger);
+      tkFloat: SetValue(l, val.AsExtended + GetValue(r).AsExtended);
       else CorruptError;
    end;
 end;
@@ -235,8 +246,8 @@ var
 begin
    val := GetValue(l);
    case val.Kind of
-      tkInteger: val^ := val.AsInteger - GetValue(r).AsInteger;
-      tkFloat: val^ := val.AsExtended - GetValue(r).AsExtended;
+      tkInteger: SetValue(l, val.AsInteger - GetValue(r).AsInteger);
+      tkFloat: SetValue(l, val.AsExtended - GetValue(r).AsExtended);
       else CorruptError;
    end;
 end;
@@ -248,8 +259,8 @@ begin
    val := GetValue(l);
    val2 := GetValue(r);
    if (val.Kind = tkInteger) and (val2.Kind = tkInteger) then
-      val^ := val.AsInteger * val2.AsInteger
-   else val^ := val.AsExtended * val2.AsExtended
+      SetValue(l, val.AsInteger * val2.AsInteger)
+   else SetValue(l, val.AsExtended * val2.AsExtended)
 end;
 
 procedure TrsExec.DivRegs(l, r: integer);
@@ -257,7 +268,7 @@ var
    val: PValue;
 begin
    val := GetValue(l);
-   val^ := val.AsInteger div GetValue(r).AsInteger;
+   SetValue(l, val.AsInteger div GetValue(r).AsInteger);
 end;
 
 procedure TrsExec.FdivRegs(l, r: integer);
@@ -265,7 +276,7 @@ var
    val: PValue;
 begin
    val := GetValue(l);
-   val^ := val.AsExtended / GetValue(r).AsExtended;
+   SetValue(l, val.AsExtended / GetValue(r).AsExtended);
 end;
 
 procedure TrsExec.ModRegs(l, r: integer);
@@ -273,7 +284,7 @@ var
    val: PValue;
 begin
    val := GetValue(l);
-   val^ := val.AsInteger mod GetValue(r).AsInteger;
+   SetValue(l, val.AsInteger mod GetValue(r).AsInteger);
 end;
 
 procedure TrsExec.AndRegs(l, r: integer);
@@ -281,7 +292,7 @@ var
    val: PValue;
 begin
    val := GetValue(l);
-   val^ := val.AsInteger and GetValue(r).AsInteger;
+   SetValue(l, val.AsInteger and GetValue(r).AsInteger);
 end;
 
 procedure TrsExec.OrRegs(l, r: integer);
@@ -289,7 +300,7 @@ var
    val: PValue;
 begin
    val := GetValue(l);
-   val^ := val.AsInteger or GetValue(r).AsInteger;
+   SetValue(l, val.AsInteger or GetValue(r).AsInteger);
 end;
 
 procedure TrsExec.XorRegs(l, r: integer);
@@ -297,7 +308,7 @@ var
    val: PValue;
 begin
    val := GetValue(l);
-   val^ := val.AsInteger xor GetValue(r).AsInteger;
+   SetValue(l, val.AsInteger xor GetValue(r).AsInteger);
 end;
 
 procedure TrsExec.ShlRegs(l, r: integer);
@@ -305,7 +316,7 @@ var
    val: PValue;
 begin
    val := GetValue(l);
-   val^ := val.AsInteger shl GetValue(r).AsInteger;
+   SetValue(l, val.AsInteger shl GetValue(r).AsInteger);
 end;
 
 procedure TrsExec.ShrRegs(l, r: integer);
@@ -313,7 +324,7 @@ var
    val: PValue;
 begin
    val := GetValue(l);
-   val^ := val.AsInteger shr GetValue(r).AsInteger;
+   SetValue(l, val.AsInteger shr GetValue(r).AsInteger);
 end;
 
 procedure TrsExec.StringConcat(l, r: integer);
@@ -321,7 +332,7 @@ var
    val: PValue;
 begin
    val := GetValue(l);
-   val^ := val.AsString + GetValue(r).AsString;
+   SetValue(l, val.AsString + GetValue(r).AsString);
 end;
 
 procedure TrsExec.MulInt(l, r: integer);
@@ -329,7 +340,7 @@ var
    val: PValue;
 begin
    val := GetValue(l);
-   val^ := val.AsInteger * r;
+   SetValue(l, val.AsInteger * r);
 end;
 
 procedure TrsExec.DivInt(l, r: integer);
@@ -337,7 +348,7 @@ var
    val: PValue;
 begin
    val := GetValue(l);
-   val^ := val.AsInteger div r;
+   SetValue(l, val.AsInteger div r);
 end;
 
 procedure TrsExec.ModInt(l, r: integer);
@@ -345,7 +356,7 @@ var
    val: PValue;
 begin
    val := GetValue(l);
-   val^ := val.AsInteger mod r;
+   SetValue(l, val.AsInteger mod r);
 end;
 
 procedure TrsExec.AndInt(l, r: integer);
@@ -353,7 +364,7 @@ var
    val: PValue;
 begin
    val := GetValue(l);
-   val^ := val.AsInteger and r;
+   SetValue(l, val.AsInteger and r);
 end;
 
 procedure TrsExec.OrInt(l, r: integer);
@@ -361,7 +372,7 @@ var
    val: PValue;
 begin
    val := GetValue(l);
-   val^ := val.AsInteger or r;
+   SetValue(l, val.AsInteger or r);
 end;
 
 procedure TrsExec.XorInt(l, r: integer);
@@ -369,7 +380,7 @@ var
    val: PValue;
 begin
    val := GetValue(l);
-   val^ := val.AsInteger xor r;
+   SetValue(l, val.AsInteger xor r);
 end;
 
 procedure TrsExec.ShlInt(l, r: integer);
@@ -377,7 +388,7 @@ var
    val: PValue;
 begin
    val := GetValue(l);
-   val^ := val.AsInteger shl r;
+   SetValue(l, val.AsInteger shl r);
 end;
 
 procedure TrsExec.ShrInt(l, r: integer);
@@ -385,7 +396,7 @@ var
    val: PValue;
 begin
    val := GetValue(l);
-   val^ := val.AsInteger shr r;
+   SetValue(l, val.AsInteger shr r);
 end;
 
 procedure TrsExec.MovRegs(l, r: integer);
@@ -430,7 +441,7 @@ var
    val: PValue;
 begin
    val := GetValue(l);
-   val^ := val.AsInteger + r;
+   SetValue(l, val.AsInteger + r);
 end;
 
 procedure TrsExec.DecRegister(l, r: integer);
@@ -438,7 +449,7 @@ var
    val: PValue;
 begin
    val := GetValue(l);
-   val^ := val.AsInteger - r;
+   SetValue(l, val.AsInteger - r);
 end;
 
 procedure TrsExec.CompGte(l, r: integer);
@@ -595,7 +606,7 @@ begin
    args := FParamLists.Peek.ToArray;
    FParamLists.Pop;
    FStack.Push(FContext);
-   retval := InvokeCode(FContext.ip + r, args);
+   retval := InvokeCode(GetIP + r, args);
    FContext := FStack.Pop;
    //TODO: this will break if a function returns nil. Hooray for the semipredicate problem!  Fix this.
    if not retval.IsEmpty then
@@ -631,7 +642,7 @@ begin
    args := FParamLists.Peek.ToArray;
    FParamLists.Pop;
    FStack.Push(FContext);
-   FParamLists.peek.Add(InvokeCode(FContext.ip + r, args));
+   FParamLists.peek.Add(InvokeCode(GetIP + r, args));
    FContext := FStack.Pop;
 end;
 
@@ -709,11 +720,11 @@ end;
 
 function TrsExec.RunLoop(resultIndex: integer; expected: TrsOpcode): TValue;
 var
-   op: ^TrsAsmInstruction;
+   op: PrsAsmInstruction;
 begin
    repeat
       inc(FContext.ip);
-      op := @FText[FContext.ip];
+      op := FContext.ip;
       case op.op of
          OP_NOP:  ;
          OP_ADD:  AddRegs(op.left, op.right);
@@ -823,8 +834,8 @@ begin
    if FDepth > FMaxStackDepth then
       raise ErsRuntimeError.CreateFmt('Script executor stack overflow at a depth of %d frames', [FDepth]);
    try
-      FContext.ip := index;
-      InitializeRegs(FProgram.Text[FContext.ip], args);
+      FContext.ip := @FProgram.Text[index];
+      InitializeRegs(FContext.ip^, args);
       result := RunLoop(length(args) + 1, OP_RET); //TODO: don't do this if it's a procedure
    finally
       dec(FDepth);
@@ -987,6 +998,11 @@ begin
    //not implemented yet
 end;
 
+function TrsExec.GetIP: integer;
+begin
+   result := (PByte(FContext.ip) - PByte(@FText[0])) div sizeof(TrsAsmInstruction);
+end;
+
 function TrsExec.GetProc(const name: string; count: integer): TRttiMethod;
 var
    methods: TList<TRttiMethod>;
@@ -1047,11 +1063,47 @@ begin
    FEnvironment := value;
 end;
 
+procedure TrsExec.InitializeReg(value: PValue; info: PTypeInfo);
+var
+   ValData: PValueData absolute value;
+begin
+   assert(not IsManaged(info));
+   if valData.FValueData <> FBlankData then
+   begin
+      //minor optimization to avoid calling AddRef and Release if possible
+      if assigned(valData.FValueData) then
+         ValData.FValueData := FBlankData
+      else pointer(ValData.FValueData) := pointer(FBlankData);
+   end;
+   ValData.FTypeInfo := info;
+   valData.FAsExtended := 0;
+end;
+
 procedure TrsExec.SetValue(i: integer; const val: TValue);
 begin
    if i > 0 then
       FContext.locals[i] := val
    else FGlobals[-i] := val;
+end;
+
+procedure TrsExec.SetValue(i: integer; const val: integer);
+var
+   left: PValueData;
+begin
+   pointer(left) := GetValue(i);
+   if not (assigned(left.FTypeInfo) and (left.FTypeInfo.kind = tkInteger)) then
+      InitializeReg(pointer(left), TypeInfo(integer));
+   left.FAsSLong := val;
+end;
+
+procedure TrsExec.SetValue(i: integer; const val: Extended);
+var
+   left: PValueData;
+begin
+   pointer(left) := GetValue(i);
+   if not (assigned(left.FTypeInfo) and (left.FTypeInfo.kind = tkFloat)) then
+      InitializeReg(pointer(left), TypeInfo(Extended));
+   left.FAsExtended := val;
 end;
 
 function TrsExec.RunProc(const name: string; const params: array of TValue): TValue;
