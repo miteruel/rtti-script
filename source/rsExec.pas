@@ -72,6 +72,8 @@ type
       FLastImport: TPair<string, TDictionary<string, pointer>>;
       FText: TArray<TrsAsmInstruction>;
       FMaxStackDepth: integer;
+
+      class var
       FBlank: TValue;
       FBlankData: IValueData;
 
@@ -95,6 +97,7 @@ type
       procedure SetValue(i: integer; const val: TValue); overload;
       procedure SetValue(i: integer; const val: integer); overload;
       procedure SetValue(i: integer; const val: Extended); overload;
+      class procedure AssignValue(l, r: PValue); static;
       function GetSR: TValue;
       procedure InitializeReg(value: PValue; info: PTypeInfo);
       function GetIP: integer;
@@ -1081,9 +1084,7 @@ end;
 
 procedure TrsExec.SetValue(i: integer; const val: TValue);
 begin
-   if i > 0 then
-      FContext.locals[i] := val
-   else FGlobals[-i] := val;
+   AssignValue(GetValue(i), @val);
 end;
 
 procedure TrsExec.SetValue(i: integer; const val: integer);
@@ -1104,6 +1105,18 @@ begin
    if not (assigned(left.FTypeInfo) and (left.FTypeInfo.kind = tkFloat)) then
       InitializeReg(pointer(left), TypeInfo(Extended));
    left.FAsExtended := val;
+end;
+
+class procedure TrsExec.AssignValue(l, r: PValue);
+var
+   lData: PValueData absolute l;
+   rData: PValueData absolute r;
+begin
+   lData.FTypeInfo := rData.FTypeInfo;
+   lData.FAsExtended := rData.FAsExtended;
+   if IsManaged(rData.FTypeInfo) or (assigned(lData.FValueData) and (lData.FValueData <> FBlankData)) then
+      lData.FValueData := rData.FValueData
+   else pointer(lData.FValueData) := pointer(FBlankData);
 end;
 
 function TrsExec.RunProc(const name: string; const params: array of TValue): TValue;
@@ -1136,7 +1149,7 @@ end;
 
 procedure TrsExec.TSimpleParamList.Add(const value: TValue);
 begin
-   FValues[FCount] := value;
+   TrsExec.AssignValue(@FValues[FCount], @value);
    inc(FCount);
 end;
 
