@@ -689,7 +689,7 @@ end;
 
 constructor TBinOpSyntax.Create(op: TBinOpKind; left, right: TTypedSyntax);
 begin
-   if (left.kind = skValue) and (right.kind <> skValue) then
+   if (left.kind = skValue) and (right.kind <> skValue) and (left.&type.TypeInfo.Kind <> tkUString) then
       Create(op, right, left)
    else begin
       inherited Create(skBinOp);
