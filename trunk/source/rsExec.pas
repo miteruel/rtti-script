@@ -20,7 +20,7 @@ unit rsExec;
 
 interface
 uses
-   SysUtils, TypInfo, RTTI, PrivateHeap, Generics.Collections,
+   SysUtils, TypInfo, RTTI, PrivateHeap, Generics.Collections, Windows,
    newClass, rsDefsBackend;
 
 type
@@ -29,7 +29,7 @@ type
    TExecImportCall = reference to procedure(const name: string; address: pointer);
    TrsExecImportProc = reference to procedure(RegisterFunction: TExecImportCall);
 
-   TrsExec = class
+   TrsVM = class
    private type
       TVmContext = record
          locals: array of TValue;
@@ -53,45 +53,18 @@ type
       //debug routine for until I get an actual debugger set up
       procedure RegState; virtual;
    private
-      FProgram: TrsProgram;
-      FHeap: TPrivateHeap;
-      FRunOnLoad: boolean;
-      FProcMap: TMultimap<string, TRttiMethod>;
-      FExtUnits: TDictionary<string, TrsExecImportProc>;
-      FExtRoutines: TArray<TRttiMethod>;
-      FImpls: TObjectList<TMethodImplementation>;
+      FParent: TrsExec;
       FDepth: integer;
       FStack: TStack<TVmContext>;
       FSrStack: TStack<TsrPair>;
       FContext: TVmContext;
-      FGlobals: TArray<TValue>;
-      FEnvironment: TObject;
       FParamLists: TObjectStack<TSimpleParamList>;
-      FNewClasses: TList<TClass>;
-      FConstants: array of TValue;
-      FLastImport: TPair<string, TDictionary<string, pointer>>;
       FText: TArray<TrsAsmInstruction>;
-      FMaxStackDepth: integer;
 
-      class var
-      FBlank: TValue;
-      FBlankData: IValueData;
-
-      function GetProc(const name: string; count: integer): TRttiMethod;
-      procedure CreateMethodPointer(method: TRttiMethod; var address: pointer);
-      procedure RegisterMethodPointer(method: TRttiMethod; var address: pointer);
-      procedure MethodImplementation(UserData: Pointer;
-        const Args: TArray<TValue>; out Result: TValue);
       function InvokeCode(index: integer; const Args: TArray<TValue>): TValue;
       function RunLoop(resultIndex: integer; expected: TrsOpcode): TValue;
       procedure InitializeRegs(const op: TrsAsmInstruction;
         const Args: TArray<TValue>);
-      procedure RegisterProcs(const unitName: string; method: TRttiMethod; var address: pointer);
-      procedure LoadProcs;
-      procedure LoadConstants;
-      procedure LoadGlobals;
-      procedure LoadEnvironment;
-      function DoImport(const unitName: string): TDictionary<string, pointer>;
 
       function GetValue(i: integer): PValue;
       procedure SetValue(i: integer; const val: TValue); overload;
@@ -158,6 +131,46 @@ type
       procedure StringConcat(l, r: integer);
       procedure TruncReg(l, r: integer);
       procedure AssignIntToFloat(l, r: integer);
+   private
+      constructor Create(parent: TrsExec);
+   public
+      destructor Destroy; override;
+   end;
+
+   TrsExec = class
+   private
+      FProgram: TrsProgram;
+      FHeap: TPrivateHeap;
+      FGlobals: TArray<TValue>;
+      FConstants: TArray<TValue>;
+      FRunOnLoad: boolean;
+      FProcMap: TMultimap<string, TRttiMethod>;
+      FExtUnits: TDictionary<string, TrsExecImportProc>;
+      FExtRoutines: TArray<TRttiMethod>;
+      FImpls: TObjectList<TMethodImplementation>;
+      FText: TArray<TrsAsmInstruction>;
+      FEnvironment: TObject;
+      FNewClasses: TList<TClass>;
+      FLastImport: TPair<string, TDictionary<string, pointer>>;
+      FMaxStackDepth: integer;
+      FVmMap: TObjectDictionary<cardinal, TrsVm>;
+
+      class var
+      FBlank: TValue;
+      FBlankData: IValueData;
+
+      function GetProc(const name: string; count: integer): TRttiMethod;
+      procedure CreateMethodPointer(method: TRttiMethod; var address: pointer);
+      procedure RegisterMethodPointer(method: TRttiMethod; var address: pointer);
+      procedure MethodImplementation(UserData: Pointer;
+        const Args: TArray<TValue>; out Result: TValue);
+      procedure RegisterProcs(const unitName: string; method: TRttiMethod; var address: pointer);
+      procedure LoadProcs;
+      procedure LoadConstants;
+      procedure LoadGlobals;
+      procedure LoadEnvironment;
+      function DoImport(const unitName: string): TDictionary<string, pointer>;
+      function GetVM: TrsVM;
    public
       constructor Create;
       destructor Destroy; override;
@@ -165,6 +178,7 @@ type
       procedure Run;
       function RunProc(const name: string; const params: array of TValue): TValue;
       function GetProcAddress(const name: string): pointer;
+      procedure Clean;
 
       procedure RegisterStandardUnit(const name: string; const proc: TrsExecImportProc);
       procedure SetEnvironment(value: TObject);
@@ -177,7 +191,7 @@ type
 
 implementation
 uses
-   StrUtils, Types, Math, //Windows,
+   StrUtils, Types, Math, Classes, tlHelp32,
    rsEnex,
    vmtStructure;
 
@@ -203,651 +217,80 @@ var
 begin
    FHeap := TPrivateHeap.Create;
    FProcMap := TMultimap<string, TRttiMethod>.Create;
-   FParamLists := TObjectStack<TSimpleParamList>.Create;
-   FParamLists.OwnsObjects := true;
    FNewClasses := TList<TClass>.Create;
    FImpls := TObjectList<TMethodImplementation>.Create;
    FImpls.OwnsObjects := true;
    FExtUnits := TDictionary<string, TrsExecImportProc>.Create;
-   FStack := TStack<TVmContext>.Create;
-   FsrStack := TStack<TsrPair>.Create;
    FMaxStackDepth := 2048;
    FBlank := TValue.Empty;
    notBlank := FBlank.Cast<integer>;
    FBlankData := TValueData(notBlank).FValueData;
+   FVmMap := TObjectDictionary<cardinal, TrsVm>.Create;
 end;
 
 destructor TrsExec.Destroy;
 begin
-   FsrStack.Free;
+   FVmMap.Free;
    FProcMap.Free;
-   FStack.Free;
    FLastImport.Value.Free;
    FExtUnits.Free;
    FImpls.Free;
    FNewClasses.Free;
-   FParamLists.Free;
    FHeap.Free;
    inherited Destroy;
 end;
 
-procedure TrsExec.AddRegs(l, r: integer);
+function TrsExec.GetVM: TrsVM;
 var
-   val: PValue;
+   id: cardinal;
 begin
-   val := GetValue(l);
-   case val.Kind of
-      tkInteger: SetValue(l, val.AsInteger + GetValue(r).AsInteger);
-      tkFloat: SetValue(l, val.AsExtended + GetValue(r).AsExtended);
-      else CorruptError;
-   end;
-end;
-
-procedure TrsExec.SubRegs(l, r: integer);
-var
-   val: PValue;
-begin
-   val := GetValue(l);
-   case val.Kind of
-      tkInteger: SetValue(l, val.AsInteger - GetValue(r).AsInteger);
-      tkFloat: SetValue(l, val.AsExtended - GetValue(r).AsExtended);
-      else CorruptError;
-   end;
-end;
-
-procedure TrsExec.MulRegs(l, r: integer);
-var
-   val, val2: PValue;
-begin
-   val := GetValue(l);
-   val2 := GetValue(r);
-   if (val.Kind = tkInteger) and (val2.Kind = tkInteger) then
-      SetValue(l, val.AsInteger * val2.AsInteger)
-   else SetValue(l, val.AsExtended * val2.AsExtended)
-end;
-
-procedure TrsExec.DivRegs(l, r: integer);
-var
-   val: PValue;
-begin
-   val := GetValue(l);
-   SetValue(l, val.AsInteger div GetValue(r).AsInteger);
-end;
-
-procedure TrsExec.FdivRegs(l, r: integer);
-var
-   val: PValue;
-begin
-   val := GetValue(l);
-   SetValue(l, val.AsExtended / GetValue(r).AsExtended);
-end;
-
-procedure TrsExec.ModRegs(l, r: integer);
-var
-   val: PValue;
-begin
-   val := GetValue(l);
-   SetValue(l, val.AsInteger mod GetValue(r).AsInteger);
-end;
-
-procedure TrsExec.AndRegs(l, r: integer);
-var
-   val: PValue;
-begin
-   val := GetValue(l);
-   SetValue(l, val.AsInteger and GetValue(r).AsInteger);
-end;
-
-procedure TrsExec.OrRegs(l, r: integer);
-var
-   val: PValue;
-begin
-   val := GetValue(l);
-   SetValue(l, val.AsInteger or GetValue(r).AsInteger);
-end;
-
-procedure TrsExec.XorRegs(l, r: integer);
-var
-   val: PValue;
-begin
-   val := GetValue(l);
-   SetValue(l, val.AsInteger xor GetValue(r).AsInteger);
-end;
-
-procedure TrsExec.ShlRegs(l, r: integer);
-var
-   val: PValue;
-begin
-   val := GetValue(l);
-   SetValue(l, val.AsInteger shl GetValue(r).AsInteger);
-end;
-
-procedure TrsExec.ShrRegs(l, r: integer);
-var
-   val: PValue;
-begin
-   val := GetValue(l);
-   SetValue(l, val.AsInteger shr GetValue(r).AsInteger);
-end;
-
-procedure TrsExec.StringConcat(l, r: integer);
-var
-   val: PValue;
-begin
-   val := GetValue(l);
-   SetValue(l, val.AsString + GetValue(r).AsString);
-end;
-
-procedure TrsExec.MulInt(l, r: integer);
-var
-   val: PValue;
-begin
-   val := GetValue(l);
-   SetValue(l, val.AsInteger * r);
-end;
-
-procedure TrsExec.DivInt(l, r: integer);
-var
-   val: PValue;
-begin
-   val := GetValue(l);
-   SetValue(l, val.AsInteger div r);
-end;
-
-procedure TrsExec.ModInt(l, r: integer);
-var
-   val: PValue;
-begin
-   val := GetValue(l);
-   SetValue(l, val.AsInteger mod r);
-end;
-
-procedure TrsExec.AndInt(l, r: integer);
-var
-   val: PValue;
-begin
-   val := GetValue(l);
-   SetValue(l, val.AsInteger and r);
-end;
-
-procedure TrsExec.OrInt(l, r: integer);
-var
-   val: PValue;
-begin
-   val := GetValue(l);
-   SetValue(l, val.AsInteger or r);
-end;
-
-procedure TrsExec.XorInt(l, r: integer);
-var
-   val: PValue;
-begin
-   val := GetValue(l);
-   SetValue(l, val.AsInteger xor r);
-end;
-
-procedure TrsExec.ShlInt(l, r: integer);
-var
-   val: PValue;
-begin
-   val := GetValue(l);
-   SetValue(l, val.AsInteger shl r);
-end;
-
-procedure TrsExec.ShrInt(l, r: integer);
-var
-   val: PValue;
-begin
-   val := GetValue(l);
-   SetValue(l, val.AsInteger shr r);
-end;
-
-procedure TrsExec.MovRegs(l, r: integer);
-begin
-   SetValue(l, GetValue(r)^);
-end;
-
-procedure TrsExec.MovConst(l, r: integer);
-begin
-   SetValue(l, FConstants[r]);
-end;
-
-procedure TrsExec.MovInt(l, r: integer);
-begin
-   SetValue(l, r);
-end;
-
-procedure TrsExec.NegRegister(l, r: integer);
-var
-   val2: PValue;
-begin
-   val2 := GetValue(r);
-   case val2.Kind of
-      tkInteger: SetValue(l, -val2.AsInteger);
-      tkFloat: SetValue(l,-val2.AsExtended);
-      else CorruptError;
-   end;
-end;
-
-procedure TrsExec.NotRegister(l, r: integer);
-begin
-   if l = 0 then
-      FContext.br := not FContext.br
-   else begin
-      FContext.br := not FContext.locals[r].AsBoolean;
-      SetValue(l, FContext.br);
-   end;
-end;
-
-procedure TrsExec.IncRegister(l, r: integer);
-var
-   val: PValue;
-begin
-   val := GetValue(l);
-   SetValue(l, val.AsInteger + r);
-end;
-
-procedure TrsExec.DecRegister(l, r: integer);
-var
-   val: PValue;
-begin
-   val := GetValue(l);
-   SetValue(l, val.AsInteger - r);
-end;
-
-procedure TrsExec.CompGte(l, r: integer);
-var
-   val, val2: PValue;
-begin
-   val := GetValue(l);
-   val2 := GetValue(r);
-   case val.Kind of
-      tkInteger: FContext.br := val.AsInteger >= val2.AsInteger;
-      tkFloat: FContext.br := val.AsExtended >= val2.AsExtended;
-      tkString, tkChar: FContext.br := val.AsString >= val2.AsString;
-      else CorruptError;
-   end;
-end;
-
-procedure TrsExec.CompLte(l, r: integer);
-var
-   val, val2: PValue;
-begin
-   val := GetValue(l);
-   val2 := GetValue(r);
-   case val.Kind of
-      tkInteger: FContext.br := val.AsInteger <= val2.AsInteger;
-      tkFloat: FContext.br := val.AsExtended <= val2.AsExtended;
-      tkString, tkChar: FContext.br := val.AsString <= val2.AsString;
-      else CorruptError;
-   end;
-end;
-
-procedure TrsExec.CompGt(l, r: integer);
-begin
-   CompLte(l, r);
-   FContext.br := not FContext.br;
-end;
-
-procedure TrsExec.CompLt(l, r: integer);
-begin
-   CompGte(l, r);
-   FContext.br := not FContext.br;
-end;
-
-procedure TrsExec.CompEq(l, r: integer);
-var
-   val, val2: PValue;
-begin
-   val := GetValue(l);
-   val2 := GetValue(r);
-   case val.Kind of
-      tkInteger: FContext.br := val.AsInteger = val2.AsInteger;
-      tkFloat: FContext.br := val.AsExtended = val2.AsExtended;
-      tkString, tkChar: FContext.br := val.AsString = val2.AsString;
-      else CorruptError;
-   end;
-end;
-
-procedure TrsExec.CompGtei(l, r: integer);
-var
-   val: PValue;
-begin
-   val := GetValue(l);
-   case val.Kind of
-      tkInteger: FContext.br := val.AsInteger >= r;
-      tkFloat: FContext.br := val.AsExtended >= r;
-      else CorruptError;
-   end;
-end;
-
-procedure TrsExec.CompLtei(l, r: integer);
-var
-   val: PValue;
-begin
-   val := GetValue(l);
-   case val.Kind of
-      tkInteger: FContext.br := val.AsInteger <= r;
-      tkFloat: FContext.br := val.AsExtended <= r;
-      else CorruptError;
-   end;
-end;
-
-procedure TrsExec.CompGti(l, r: integer);
-begin
-   CompLtei(l, r);
-   FContext.br := not FContext.br;
-end;
-
-procedure TrsExec.CompLti(l, r: integer);
-begin
-   CompGtei(l, r);
-   FContext.br := not FContext.br;
-end;
-
-procedure TrsExec.CompEqi(l, r: integer);
-var
-   val: PValue;
-begin
-   val := GetValue(l);
-   case val.Kind of
-      tkInteger: FContext.br := val.AsInteger = r;
-      tkFloat: FContext.br := val.AsExtended = r;
-      else CorruptError;
-   end;
-end;
-
-procedure TrsExec.CompNeqi(l, r: integer);
-begin
-   CompEqi(l, r);
-   FContext.br := not FContext.br;
-end;
-
-procedure TrsExec.CompNeq(l, r: integer);
-begin
-   CompEq(l, r);
-   FContext.br := not FContext.br;
-end;
-
-function TrsExec.RegAsBoolean(index: integer): boolean;
-begin
-   if index = 0 then
-      result := FContext.br
-   else result := GetValue(index).AsBoolean;
-end;
-
-procedure TrsExec.XorbRegs(l, r: integer);
-begin
-   FContext.br := RegAsBoolean(l) xor RegAsBoolean(r);
-end;
-
-procedure TrsExec.NewList(l: integer);
-begin
-   FParamLists.Push(TSimpleParamList.Create(l));
-end;
-
-procedure TrsExec.PushValue(l: integer);
-begin
-   FParamLists.peek.Add(GetValue(l)^);
-end;
-
-procedure TrsExec.PushInt(l: integer);
-begin
-   FParamLists.peek.Add(l);
-end;
-
-procedure TrsExec.PushConst(l: integer);
-begin
-   FParamLists.Peek.Add(FConstants[l]);
-end;
-
-procedure TrsExec.Call(l, r: integer);
-var
-   args: TArray<TValue>;
-   retval: TValue;
-begin
-   args := FParamLists.Peek.ToArray;
-   FParamLists.Pop;
-   FStack.Push(FContext);
-   retval := InvokeCode(GetIP + r, args);
-   FContext := FStack.Pop;
-   //TODO: this will break if a function returns nil. Hooray for the semipredicate problem!  Fix this.
-   if not retval.IsEmpty then
-      SetValue(l, retval);
-end;
-
-procedure TrsExec.Callx(l, r: integer);
-var
-   args: TArray<TValue>;
-   method: TRttiMethod;
-   handle: PTypeInfo;
-   retval: TValue;
-begin
-   args := FParamLists.Peek.ToArray;
-   FParamLists.Pop;
-   method := FExtRoutines[r];
-   if method.IsStatic then
+   id := TThread.CurrentThread.ThreadID;
+   if not FvmMap.TryGetValue(id, result) then
    begin
-      if assigned(method.ReturnType) then
-         handle := method.ReturnType.Handle
-      else handle := nil;
-      retval := RTTI.Invoke(method.CodeAddress, args, method.CallingConvention, Handle)
-   end
-   else retval := method.Invoke(GetSR, args);
-   if assigned(method.ReturnType) then
-      SetValue(l, retval);
-end;
-
-procedure TrsExec.PCall(l, r: integer);
-var
-   args: TArray<TValue>;
-begin
-   args := FParamLists.Peek.ToArray;
-   FParamLists.Pop;
-   FStack.Push(FContext);
-   FParamLists.peek.Add(InvokeCode(GetIP + r, args));
-   FContext := FStack.Pop;
-end;
-
-procedure TrsExec.PCallx(l, r: integer);
-var
-   args: TArray<TValue>;
-   method: TRttiMethod;
-begin
-   args := FParamLists.Peek.ToArray;
-   FParamLists.Pop;
-   method := FExtRoutines[r];
-   if method.IsStatic then
-      FParamLists.peek.Add(RTTI.Invoke(method.CodeAddress, args, method.CallingConvention, method.ReturnType.Handle))
-   else FParamLists.peek.Add(method.Invoke(GetSR, args));
-end;
-
-procedure TrsExec.ArrayLoad(l: integer);
-var
-   val: PValue;
-begin
-   val := GetValue(l);
-   if not (val.IsArray) then
-      CorruptError;
-   FContext.ar := val;
-end;
-
-procedure TrsExec.AssignIntToFloat(l: integer; r: integer);
-begin
-   SetValue(l, GetValue(r).AsExtended);
-end;
-
-procedure TrsExec.ArrayElemMove(l: integer; r: integer);
-begin
-   if not (assigned(FContext.ar) and (FContext.ar.IsArray)) then
-      CorruptError;
-   SetValue(l, FContext.ar.GetArrayElement(r));
-end;
-
-procedure TrsExec.ArrayElemAssignC(l: integer; r: integer);
-begin
-   if not (assigned(FContext.ar) and (FContext.ar.IsArray)) then
-      CorruptError;
-   FContext.ar.SetArrayElement(l, GetValue(r)^);
-end;
-
-procedure TrsExec.ArrayElemAssign(l: integer; r: integer);
-var
-   val: PValue;
-begin
-   val := GetValue(l);
-   if val.kind <> tkInteger then
-      CorruptError;
-   ArrayElemAssignC(val.AsInteger, r);
-end;
-
-procedure TrsExec.LoadSelfRegister(l: integer);
-var
-   val: PValue;
-begin
-   val := GetValue(l);
-   if not (val.IsObject) then
-      CorruptError;
-   FsrStack.Push(TsrPair.Create(val^, FDepth));
-end;
-
-procedure TrsExec.TruncReg(l, r: integer);
-var
-   val2: PValue;
-begin
-   val2 := GetValue(r);
-   if val2.Kind = tkInteger then
-      SetValue(l, val2^)
-   else SetValue(l, trunc(val2.AsExtended));
-end;
-
-function TrsExec.RunLoop(resultIndex: integer; expected: TrsOpcode): TValue;
-var
-   op: PrsAsmInstruction;
-begin
-   repeat
-      inc(FContext.ip);
-      op := FContext.ip;
-      case op.op of
-         OP_NOP:  ;
-         OP_ADD:  AddRegs(op.left, op.right);
-         OP_SUB:  SubRegs(op.left, op.right);
-         OP_MUL:  MulRegs(op.left, op.right);
-         OP_DIV:  DivRegs(op.left, op.right);
-         OP_FDIV: FdivRegs(op.left, op.right);
-         OP_MOD:  ModRegs(op.left, op.right);
-         OP_AND:  AndRegs(op.left, op.right);
-         OP_OR:   OrRegs(op.left, op.right);
-         OP_XOR:  XorRegs(op.left, op.right);
-         OP_SHL:  ShlRegs(op.left, op.right);
-         OP_SHR:  ShrRegs(op.left, op.right);
-         OP_AS:   NotImplemented;
-         OP_SCAT: StringConcat(op.left, op.right);
-         OP_MULI: MulInt(op.left, op.right);
-         OP_DIVI: DivInt(op.left, op.right);
-         OP_MODI: ModInt(op.left, op.right);
-         OP_ANDI: AndInt(op.left, op.right);
-         OP_ORI:  OrInt(op.left, op.right);
-         OP_XORI: XorInt(op.left, op.right);
-         OP_SHLI: ShlInt(op.left, op.right);
-         OP_SHRI: ShrInt(op.left, op.right);
-
-         OP_MOV:  MovRegs(op.left, op.right);
-         OP_MOVC: MovConst(op.left, op.right);
-         OP_MOVI: MovInt(op.left, op.right);
-         OP_MOVF: NotImplemented;
-         OP_MOVP: NotImplemented;
-         OP_NEG:  NegRegister(op.left, op.right);
-         OP_NOT:  NotRegister(op.left, op.right);
-         OP_INC:  IncRegister(op.left, op.right);
-         OP_DEC:  DecRegister(op.left, op.right);
-         OP_GTE:  CompGte(op.left, op.right);
-         OP_LTE:  CompLte(op.left, op.right);
-         OP_GT:   CompGt(op.left, op.right);
-         OP_LT:   CompLt(op.left, op.right);
-         OP_EQ:   CompEq(op.left, op.right);
-         OP_NEQ:  CompNeq(op.left, op.right);
-         OP_GTEI: CompGtei(op.left, op.right);
-         OP_LTEI: CompLtei(op.left, op.right);
-         OP_GTI:  CompGti(op.left, op.right);
-         OP_LTI:  CompLti(op.left, op.right);
-         OP_EQI:  CompEqi(op.left, op.right);
-         OP_NEQI: CompNeqi(op.left, op.right);
-         OP_IN:   NotImplemented;
-         OP_IS:   NotImplemented;
-         OP_XORB: XorbRegs(op.left, op.right);
-         OP_LIST: NewList(op.left);
-         OP_PUSH: PushValue(op.left);
-         OP_PSHI: PushInt(op.left);
-         OP_PSHC: PushConst(op.left);
-         OP_CALL: Call(op.left, op.right);
-         OP_CALX: CallX(op.left, op.right);
-         OP_PCAL: PCall(op.left, op.right);
-         OP_PCLX: PCallX(op.left, op.right);
-         OP_INIT: CorruptError;
-         OP_RET:  Break;
-                   //-1 because IP will increment after the loop
-         OP_JUMP: inc(FContext.ip, op.left - 1);
-         OP_FJMP: if not FContext.br then
-                     inc(FContext.ip, op.left - 1);
-         OP_TJMP: if FContext.br then
-                     inc(FContext.ip, op.left - 1);
-         OP_ARYL: ArrayLoad(op.left);
-         OP_ELEM: ArrayElemMove(op.left, op.right);
-         OP_VASN: MovRegs(op.left, op.right);
-         OP_AITF: AssignIntToFloat(op.left, op.right);
-         OP_EASN: ArrayElemAssign(op.left, op.right);
-         OP_EASC: ArrayElemAssignC(op.left, op.right);
-         OP_FASN: NotImplemented;
-         OP_PASN: NotImplemented;
-         OP_TRYF: NotImplemented;
-         OP_TRYE: NotImplemented;
-         OP_TRYC: NotImplemented;
-         OP_CTRY: Break;
-         OP_EXIS: NotImplemented;
-         OP_EXLD: NotImplemented;
-         OP_RAIS: NotImplemented;
-         OP_SRLD: LoadSelfRegister(op.left);
-         OP_MCLS: NotImplemented;
-         OP_TRNC: TruncReg(op.left, op.right)
-         else CorruptError;
-      end;
-   until false;
-   if op.op <> expected then
-      CorruptError;
-   result := FContext.Locals[resultIndex];
-end;
-
-procedure TrsExec.InitializeRegs(const op:  TrsAsmInstruction; const Args: TArray<TValue>);
-var
-   i: integer;
-begin
-   if op.op <> OP_INIT then
-      raise ErsRuntimeError.Create('Invalid function entry point.');
-   SetLength(FContext.locals, op.left + 1);
-   FContext.ar := nil;
-   FContext.br := false;
-   for i := 0 to high(args) do
-      FContext.locals[i + 1] := args[i];
-end;
-
-function TrsExec.InvokeCode(index: integer; const Args: TArray<TValue>): TValue;
-begin
-   inc(FDepth);
-   if FDepth > FMaxStackDepth then
-      raise ErsRuntimeError.CreateFmt('Script executor stack overflow at a depth of %d frames', [FDepth]);
-   try
-      FContext.ip := @FProgram.Text[index];
-      InitializeRegs(FContext.ip^, args);
-      result := RunLoop(length(args) + 1, OP_RET); //TODO: don't do this if it's a procedure
-   finally
-      dec(FDepth);
+      result := TrsVM.Create(self);
+      FvmMap.Add(id, result);
    end;
 end;
 
 procedure TrsExec.MethodImplementation(UserData: Pointer; const Args: TArray<TValue>; out Result: TValue);
 begin
-   result := InvokeCode(NativeInt(UserData), args);
+   result := GetVM.InvokeCode(NativeInt(UserData), args);
+end;
+
+//thanks to Raymond Chen for the code to find all thread IDs
+//http://blogs.msdn.com/b/oldnewthing/archive/2006/02/23/537856.aspx
+procedure TrsExec.Clean;
+var
+   h: THandle;
+   id: nativeUInt;
+   te: THREADENTRY32;
+   threadlist, deadlist: TList;
+begin
+   threadlist := TList.Create;
+   deadlist := TList.Create;
+   try
+      h := CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+      if (h <> INVALID_HANDLE_VALUE) then
+      begin
+         te.dwSize := sizeof(te);
+         if (Thread32First(h, te)) then
+         repeat
+            assert(te.dwSize >= sizeof(DWORD) * 3);
+            threadlist.Add(pointer(te.th32ThreadID));
+            te.dwSize := sizeof(te);
+         until not (Thread32Next(h, te));
+      end;
+      CloseHandle(h);
+      for id in FVmMap.Keys do
+         if threadList.IndexOf(pointer(id)) = -1 then
+            deadList.Add(pointer(id));
+      if deadList.Count > 0 then
+         for id := 0 to deadList.Count - 1 do
+            FVmMap.Remove(cardinal(deadList[id]));
+   finally
+      threadlist.Free;
+      deadlist.Free;
+   end;
 end;
 
 procedure TrsExec.CreateMethodPointer(method: TRttiMethod; var address: pointer);
@@ -1001,11 +444,6 @@ begin
    //not implemented yet
 end;
 
-function TrsExec.GetIP: integer;
-begin
-   result := (PByte(FContext.ip) - PByte(@FText[0])) div sizeof(TrsAsmInstruction);
-end;
-
 function TrsExec.GetProc(const name: string; count: integer): TRttiMethod;
 var
    methods: TList<TRttiMethod>;
@@ -1045,78 +483,11 @@ begin
    else raise ErsRuntimeError.CreateFmt('Found more than one procedure %s.  Fully qualified name is required.', [name]);
 end;
 
-function TrsExec.GetSR: TValue;
-begin
-   if (FsrStack.Count = 0) or (FsrStack.Peek.Value <> FDepth) then
-      CorruptError;
-   result := FsrStack.Pop.Key;
-end;
-
-function TrsExec.GetValue(i: integer): PValue;
-begin
-   if i > 0 then
-      result := @FContext.locals[i]
-   else result := @FGlobals[-i];
-end;
-
 procedure TrsExec.SetEnvironment(value: TObject);
 begin
    if assigned(FProgram) then
       raise ErsRuntimeError.Create('Environment must be set before the script program is loaded.');
    FEnvironment := value;
-end;
-
-procedure TrsExec.InitializeReg(value: PValue; info: PTypeInfo);
-var
-   ValData: PValueData absolute value;
-begin
-   assert(not IsManaged(info));
-   if valData.FValueData <> FBlankData then
-   begin
-      //minor optimization to avoid calling AddRef and Release if possible
-      if assigned(valData.FValueData) then
-         ValData.FValueData := FBlankData
-      else pointer(ValData.FValueData) := pointer(FBlankData);
-   end;
-   ValData.FTypeInfo := info;
-   valData.FAsExtended := 0;
-end;
-
-procedure TrsExec.SetValue(i: integer; const val: TValue);
-begin
-   AssignValue(GetValue(i), @val);
-end;
-
-procedure TrsExec.SetValue(i: integer; const val: integer);
-var
-   left: PValueData;
-begin
-   pointer(left) := GetValue(i);
-   if not (assigned(left.FTypeInfo) and (left.FTypeInfo.kind = tkInteger)) then
-      InitializeReg(pointer(left), TypeInfo(integer));
-   left.FAsSLong := val;
-end;
-
-procedure TrsExec.SetValue(i: integer; const val: Extended);
-var
-   left: PValueData;
-begin
-   pointer(left) := GetValue(i);
-   if not (assigned(left.FTypeInfo) and (left.FTypeInfo.kind = tkFloat)) then
-      InitializeReg(pointer(left), TypeInfo(Extended));
-   left.FAsExtended := val;
-end;
-
-class procedure TrsExec.AssignValue(l, r: PValue);
-var
-   lData: PValueData absolute l;
-   rData: PValueData absolute r;
-begin
-   lData.FTypeInfo := rData.FTypeInfo;
-   lData.FAsExtended := rData.FAsExtended;
-   if IsManaged(rData.FTypeInfo) or (assigned(lData.FValueData) and (lData.FValueData <> FBlankData)) then
-      lData.FValueData := rData.FValueData
-   else pointer(lData.FValueData) := pointer(FBlankData);
 end;
 
 function TrsExec.RunProc(const name: string; const params: array of TValue): TValue;
@@ -1132,7 +503,712 @@ begin
    FExtUnits.Add(UpperCase(name), proc);
 end;
 
-procedure TrsExec.RegState;
+{ TrsVM }
+
+constructor TrsVM.Create(parent: TrsExec);
+begin
+   FParent := parent;
+   FParamLists := TObjectStack<TSimpleParamList>.Create;
+   FParamLists.OwnsObjects := true;
+   FStack := TStack<TVmContext>.Create;
+   FsrStack := TStack<TsrPair>.Create;
+end;
+
+destructor TrsVM.Destroy;
+begin
+   FsrStack.Free;
+   FStack.Free;
+   FParamLists.Free;
+   inherited Destroy;
+end;
+
+procedure TrsVM.AddRegs(l, r: integer);
+var
+   val: PValue;
+begin
+   val := GetValue(l);
+   case val.Kind of
+      tkInteger: SetValue(l, val.AsInteger + GetValue(r).AsInteger);
+      tkFloat: SetValue(l, val.AsExtended + GetValue(r).AsExtended);
+      else CorruptError;
+   end;
+end;
+
+procedure TrsVM.SubRegs(l, r: integer);
+var
+   val: PValue;
+begin
+   val := GetValue(l);
+   case val.Kind of
+      tkInteger: SetValue(l, val.AsInteger - GetValue(r).AsInteger);
+      tkFloat: SetValue(l, val.AsExtended - GetValue(r).AsExtended);
+      else CorruptError;
+   end;
+end;
+
+procedure TrsVM.MulRegs(l, r: integer);
+var
+   val, val2: PValue;
+begin
+   val := GetValue(l);
+   val2 := GetValue(r);
+   if (val.Kind = tkInteger) and (val2.Kind = tkInteger) then
+      SetValue(l, val.AsInteger * val2.AsInteger)
+   else SetValue(l, val.AsExtended * val2.AsExtended)
+end;
+
+procedure TrsVM.DivRegs(l, r: integer);
+var
+   val: PValue;
+begin
+   val := GetValue(l);
+   SetValue(l, val.AsInteger div GetValue(r).AsInteger);
+end;
+
+procedure TrsVM.FdivRegs(l, r: integer);
+var
+   val: PValue;
+begin
+   val := GetValue(l);
+   SetValue(l, val.AsExtended / GetValue(r).AsExtended);
+end;
+
+procedure TrsVM.ModRegs(l, r: integer);
+var
+   val: PValue;
+begin
+   val := GetValue(l);
+   SetValue(l, val.AsInteger mod GetValue(r).AsInteger);
+end;
+
+procedure TrsVM.AndRegs(l, r: integer);
+var
+   val: PValue;
+begin
+   val := GetValue(l);
+   SetValue(l, val.AsInteger and GetValue(r).AsInteger);
+end;
+
+procedure TrsVM.OrRegs(l, r: integer);
+var
+   val: PValue;
+begin
+   val := GetValue(l);
+   SetValue(l, val.AsInteger or GetValue(r).AsInteger);
+end;
+
+procedure TrsVM.XorRegs(l, r: integer);
+var
+   val: PValue;
+begin
+   val := GetValue(l);
+   SetValue(l, val.AsInteger xor GetValue(r).AsInteger);
+end;
+
+procedure TrsVM.ShlRegs(l, r: integer);
+var
+   val: PValue;
+begin
+   val := GetValue(l);
+   SetValue(l, val.AsInteger shl GetValue(r).AsInteger);
+end;
+
+procedure TrsVM.ShrRegs(l, r: integer);
+var
+   val: PValue;
+begin
+   val := GetValue(l);
+   SetValue(l, val.AsInteger shr GetValue(r).AsInteger);
+end;
+
+procedure TrsVM.StringConcat(l, r: integer);
+var
+   val: PValue;
+begin
+   val := GetValue(l);
+   SetValue(l, val.AsString + GetValue(r).AsString);
+end;
+
+procedure TrsVM.MulInt(l, r: integer);
+var
+   val: PValue;
+begin
+   val := GetValue(l);
+   SetValue(l, val.AsInteger * r);
+end;
+
+procedure TrsVM.DivInt(l, r: integer);
+var
+   val: PValue;
+begin
+   val := GetValue(l);
+   SetValue(l, val.AsInteger div r);
+end;
+
+procedure TrsVM.ModInt(l, r: integer);
+var
+   val: PValue;
+begin
+   val := GetValue(l);
+   SetValue(l, val.AsInteger mod r);
+end;
+
+procedure TrsVM.AndInt(l, r: integer);
+var
+   val: PValue;
+begin
+   val := GetValue(l);
+   SetValue(l, val.AsInteger and r);
+end;
+
+procedure TrsVM.OrInt(l, r: integer);
+var
+   val: PValue;
+begin
+   val := GetValue(l);
+   SetValue(l, val.AsInteger or r);
+end;
+
+procedure TrsVM.XorInt(l, r: integer);
+var
+   val: PValue;
+begin
+   val := GetValue(l);
+   SetValue(l, val.AsInteger xor r);
+end;
+
+procedure TrsVM.ShlInt(l, r: integer);
+var
+   val: PValue;
+begin
+   val := GetValue(l);
+   SetValue(l, val.AsInteger shl r);
+end;
+
+procedure TrsVM.ShrInt(l, r: integer);
+var
+   val: PValue;
+begin
+   val := GetValue(l);
+   SetValue(l, val.AsInteger shr r);
+end;
+
+procedure TrsVM.MovRegs(l, r: integer);
+begin
+   SetValue(l, GetValue(r)^);
+end;
+
+procedure TrsVM.MovConst(l, r: integer);
+begin
+   SetValue(l, FParent.FConstants[r]);
+end;
+
+procedure TrsVM.MovInt(l, r: integer);
+begin
+   SetValue(l, r);
+end;
+
+procedure TrsVM.NegRegister(l, r: integer);
+var
+   val2: PValue;
+begin
+   val2 := GetValue(r);
+   case val2.Kind of
+      tkInteger: SetValue(l, -val2.AsInteger);
+      tkFloat: SetValue(l,-val2.AsExtended);
+      else CorruptError;
+   end;
+end;
+
+procedure TrsVM.NotRegister(l, r: integer);
+begin
+   if l = 0 then
+      FContext.br := not FContext.br
+   else begin
+      FContext.br := not FContext.locals[r].AsBoolean;
+      SetValue(l, FContext.br);
+   end;
+end;
+
+procedure TrsVM.IncRegister(l, r: integer);
+var
+   val: PValue;
+begin
+   val := GetValue(l);
+   SetValue(l, val.AsInteger + r);
+end;
+
+procedure TrsVM.DecRegister(l, r: integer);
+var
+   val: PValue;
+begin
+   val := GetValue(l);
+   SetValue(l, val.AsInteger - r);
+end;
+
+procedure TrsVM.CompGte(l, r: integer);
+var
+   val, val2: PValue;
+begin
+   val := GetValue(l);
+   val2 := GetValue(r);
+   case val.Kind of
+      tkInteger: FContext.br := val.AsInteger >= val2.AsInteger;
+      tkFloat: FContext.br := val.AsExtended >= val2.AsExtended;
+      tkString, tkChar: FContext.br := val.AsString >= val2.AsString;
+      else CorruptError;
+   end;
+end;
+
+procedure TrsVM.CompLte(l, r: integer);
+var
+   val, val2: PValue;
+begin
+   val := GetValue(l);
+   val2 := GetValue(r);
+   case val.Kind of
+      tkInteger: FContext.br := val.AsInteger <= val2.AsInteger;
+      tkFloat: FContext.br := val.AsExtended <= val2.AsExtended;
+      tkString, tkChar: FContext.br := val.AsString <= val2.AsString;
+      else CorruptError;
+   end;
+end;
+
+procedure TrsVM.CompGt(l, r: integer);
+begin
+   CompLte(l, r);
+   FContext.br := not FContext.br;
+end;
+
+procedure TrsVM.CompLt(l, r: integer);
+begin
+   CompGte(l, r);
+   FContext.br := not FContext.br;
+end;
+
+procedure TrsVM.CompEq(l, r: integer);
+var
+   val, val2: PValue;
+begin
+   val := GetValue(l);
+   val2 := GetValue(r);
+   case val.Kind of
+      tkInteger: FContext.br := val.AsInteger = val2.AsInteger;
+      tkFloat: FContext.br := val.AsExtended = val2.AsExtended;
+      tkString, tkChar: FContext.br := val.AsString = val2.AsString;
+      else CorruptError;
+   end;
+end;
+
+procedure TrsVM.CompGtei(l, r: integer);
+var
+   val: PValue;
+begin
+   val := GetValue(l);
+   case val.Kind of
+      tkInteger: FContext.br := val.AsInteger >= r;
+      tkFloat: FContext.br := val.AsExtended >= r;
+      else CorruptError;
+   end;
+end;
+
+procedure TrsVM.CompLtei(l, r: integer);
+var
+   val: PValue;
+begin
+   val := GetValue(l);
+   case val.Kind of
+      tkInteger: FContext.br := val.AsInteger <= r;
+      tkFloat: FContext.br := val.AsExtended <= r;
+      else CorruptError;
+   end;
+end;
+
+procedure TrsVM.CompGti(l, r: integer);
+begin
+   CompLtei(l, r);
+   FContext.br := not FContext.br;
+end;
+
+procedure TrsVM.CompLti(l, r: integer);
+begin
+   CompGtei(l, r);
+   FContext.br := not FContext.br;
+end;
+
+procedure TrsVM.CompEqi(l, r: integer);
+var
+   val: PValue;
+begin
+   val := GetValue(l);
+   case val.Kind of
+      tkInteger: FContext.br := val.AsInteger = r;
+      tkFloat: FContext.br := val.AsExtended = r;
+      else CorruptError;
+   end;
+end;
+
+procedure TrsVM.CompNeqi(l, r: integer);
+begin
+   CompEqi(l, r);
+   FContext.br := not FContext.br;
+end;
+
+procedure TrsVM.CompNeq(l, r: integer);
+begin
+   CompEq(l, r);
+   FContext.br := not FContext.br;
+end;
+
+function TrsVM.RegAsBoolean(index: integer): boolean;
+begin
+   if index = 0 then
+      result := FContext.br
+   else result := GetValue(index).AsBoolean;
+end;
+
+procedure TrsVM.XorbRegs(l, r: integer);
+begin
+   FContext.br := RegAsBoolean(l) xor RegAsBoolean(r);
+end;
+
+procedure TrsVM.NewList(l: integer);
+begin
+   FParamLists.Push(TSimpleParamList.Create(l));
+end;
+
+procedure TrsVM.PushValue(l: integer);
+begin
+   FParamLists.peek.Add(GetValue(l)^);
+end;
+
+procedure TrsVM.PushInt(l: integer);
+begin
+   FParamLists.peek.Add(l);
+end;
+
+procedure TrsVM.PushConst(l: integer);
+begin
+   FParamLists.Peek.Add(FParent.FConstants[l]);
+end;
+
+procedure TrsVM.Call(l, r: integer);
+var
+   args: TArray<TValue>;
+   retval: TValue;
+begin
+   args := FParamLists.Peek.ToArray;
+   FParamLists.Pop;
+   FStack.Push(FContext);
+   retval := InvokeCode(GetIP + r, args);
+   FContext := FStack.Pop;
+   //TODO: this will break if a function returns nil. Hooray for the semipredicate problem!  Fix this.
+   if not retval.IsEmpty then
+      SetValue(l, retval);
+end;
+
+procedure TrsVM.Callx(l, r: integer);
+var
+   args: TArray<TValue>;
+   method: TRttiMethod;
+   handle: PTypeInfo;
+   retval: TValue;
+begin
+   args := FParamLists.Peek.ToArray;
+   FParamLists.Pop;
+   method := FParent.FExtRoutines[r];
+   if method.IsStatic then
+   begin
+      if assigned(method.ReturnType) then
+         handle := method.ReturnType.Handle
+      else handle := nil;
+      retval := RTTI.Invoke(method.CodeAddress, args, method.CallingConvention, Handle)
+   end
+   else retval := method.Invoke(GetSR, args);
+   if assigned(method.ReturnType) then
+      SetValue(l, retval);
+end;
+
+procedure TrsVM.PCall(l, r: integer);
+var
+   args: TArray<TValue>;
+begin
+   args := FParamLists.Peek.ToArray;
+   FParamLists.Pop;
+   FStack.Push(FContext);
+   FParamLists.peek.Add(InvokeCode(GetIP + r, args));
+   FContext := FStack.Pop;
+end;
+
+procedure TrsVM.PCallx(l, r: integer);
+var
+   args: TArray<TValue>;
+   method: TRttiMethod;
+begin
+   args := FParamLists.Peek.ToArray;
+   FParamLists.Pop;
+   method := FParent.FExtRoutines[r];
+   if method.IsStatic then
+      FParamLists.peek.Add(RTTI.Invoke(method.CodeAddress, args, method.CallingConvention, method.ReturnType.Handle))
+   else FParamLists.peek.Add(method.Invoke(GetSR, args));
+end;
+
+procedure TrsVM.ArrayLoad(l: integer);
+var
+   val: PValue;
+begin
+   val := GetValue(l);
+   if not (val.IsArray) then
+      CorruptError;
+   FContext.ar := val;
+end;
+
+procedure TrsVM.AssignIntToFloat(l: integer; r: integer);
+begin
+   SetValue(l, GetValue(r).AsExtended);
+end;
+
+procedure TrsVM.ArrayElemMove(l: integer; r: integer);
+begin
+   if not (assigned(FContext.ar) and (FContext.ar.IsArray)) then
+      CorruptError;
+   SetValue(l, FContext.ar.GetArrayElement(r));
+end;
+
+procedure TrsVM.ArrayElemAssignC(l: integer; r: integer);
+begin
+   if not (assigned(FContext.ar) and (FContext.ar.IsArray)) then
+      CorruptError;
+   FContext.ar.SetArrayElement(l, GetValue(r)^);
+end;
+
+procedure TrsVM.ArrayElemAssign(l: integer; r: integer);
+var
+   val: PValue;
+begin
+   val := GetValue(l);
+   if val.kind <> tkInteger then
+      CorruptError;
+   ArrayElemAssignC(val.AsInteger, r);
+end;
+
+procedure TrsVM.LoadSelfRegister(l: integer);
+var
+   val: PValue;
+begin
+   val := GetValue(l);
+   if not (val.IsObject) then
+      CorruptError;
+   FsrStack.Push(TsrPair.Create(val^, FDepth));
+end;
+
+procedure TrsVM.TruncReg(l, r: integer);
+var
+   val2: PValue;
+begin
+   val2 := GetValue(r);
+   if val2.Kind = tkInteger then
+      SetValue(l, val2^)
+   else SetValue(l, trunc(val2.AsExtended));
+end;
+
+function TrsVM.RunLoop(resultIndex: integer; expected: TrsOpcode): TValue;
+var
+   op: PrsAsmInstruction;
+begin
+   repeat
+      inc(FContext.ip);
+      op := FContext.ip;
+      case op.op of
+         OP_NOP:  ;
+         OP_ADD:  AddRegs(op.left, op.right);
+         OP_SUB:  SubRegs(op.left, op.right);
+         OP_MUL:  MulRegs(op.left, op.right);
+         OP_DIV:  DivRegs(op.left, op.right);
+         OP_FDIV: FdivRegs(op.left, op.right);
+         OP_MOD:  ModRegs(op.left, op.right);
+         OP_AND:  AndRegs(op.left, op.right);
+         OP_OR:   OrRegs(op.left, op.right);
+         OP_XOR:  XorRegs(op.left, op.right);
+         OP_SHL:  ShlRegs(op.left, op.right);
+         OP_SHR:  ShrRegs(op.left, op.right);
+         OP_AS:   NotImplemented;
+         OP_SCAT: StringConcat(op.left, op.right);
+         OP_MULI: MulInt(op.left, op.right);
+         OP_DIVI: DivInt(op.left, op.right);
+         OP_MODI: ModInt(op.left, op.right);
+         OP_ANDI: AndInt(op.left, op.right);
+         OP_ORI:  OrInt(op.left, op.right);
+         OP_XORI: XorInt(op.left, op.right);
+         OP_SHLI: ShlInt(op.left, op.right);
+         OP_SHRI: ShrInt(op.left, op.right);
+
+         OP_MOV:  MovRegs(op.left, op.right);
+         OP_MOVC: MovConst(op.left, op.right);
+         OP_MOVI: MovInt(op.left, op.right);
+         OP_MOVF: NotImplemented;
+         OP_MOVP: NotImplemented;
+         OP_NEG:  NegRegister(op.left, op.right);
+         OP_NOT:  NotRegister(op.left, op.right);
+         OP_INC:  IncRegister(op.left, op.right);
+         OP_DEC:  DecRegister(op.left, op.right);
+         OP_GTE:  CompGte(op.left, op.right);
+         OP_LTE:  CompLte(op.left, op.right);
+         OP_GT:   CompGt(op.left, op.right);
+         OP_LT:   CompLt(op.left, op.right);
+         OP_EQ:   CompEq(op.left, op.right);
+         OP_NEQ:  CompNeq(op.left, op.right);
+         OP_GTEI: CompGtei(op.left, op.right);
+         OP_LTEI: CompLtei(op.left, op.right);
+         OP_GTI:  CompGti(op.left, op.right);
+         OP_LTI:  CompLti(op.left, op.right);
+         OP_EQI:  CompEqi(op.left, op.right);
+         OP_NEQI: CompNeqi(op.left, op.right);
+         OP_IN:   NotImplemented;
+         OP_IS:   NotImplemented;
+         OP_XORB: XorbRegs(op.left, op.right);
+         OP_LIST: NewList(op.left);
+         OP_PUSH: PushValue(op.left);
+         OP_PSHI: PushInt(op.left);
+         OP_PSHC: PushConst(op.left);
+         OP_CALL: Call(op.left, op.right);
+         OP_CALX: CallX(op.left, op.right);
+         OP_PCAL: PCall(op.left, op.right);
+         OP_PCLX: PCallX(op.left, op.right);
+         OP_INIT: CorruptError;
+         OP_RET:  Break;
+                   //-1 because IP will increment after the loop
+         OP_JUMP: inc(FContext.ip, op.left - 1);
+         OP_FJMP: if not FContext.br then
+                     inc(FContext.ip, op.left - 1);
+         OP_TJMP: if FContext.br then
+                     inc(FContext.ip, op.left - 1);
+         OP_ARYL: ArrayLoad(op.left);
+         OP_ELEM: ArrayElemMove(op.left, op.right);
+         OP_VASN: MovRegs(op.left, op.right);
+         OP_AITF: AssignIntToFloat(op.left, op.right);
+         OP_EASN: ArrayElemAssign(op.left, op.right);
+         OP_EASC: ArrayElemAssignC(op.left, op.right);
+         OP_FASN: NotImplemented;
+         OP_PASN: NotImplemented;
+         OP_TRYF: NotImplemented;
+         OP_TRYE: NotImplemented;
+         OP_TRYC: NotImplemented;
+         OP_CTRY: Break;
+         OP_EXIS: NotImplemented;
+         OP_EXLD: NotImplemented;
+         OP_RAIS: NotImplemented;
+         OP_SRLD: LoadSelfRegister(op.left);
+         OP_MCLS: NotImplemented;
+         OP_TRNC: TruncReg(op.left, op.right)
+         else CorruptError;
+      end;
+   until false;
+   if op.op <> expected then
+      CorruptError;
+   result := FContext.Locals[resultIndex];
+end;
+
+procedure TrsVM.InitializeRegs(const op:  TrsAsmInstruction; const Args: TArray<TValue>);
+var
+   i: integer;
+begin
+   if op.op <> OP_INIT then
+      raise ErsRuntimeError.Create('Invalid function entry point.');
+   SetLength(FContext.locals, op.left + 1);
+   FContext.ar := nil;
+   FContext.br := false;
+   for i := 0 to high(args) do
+      FContext.locals[i + 1] := args[i];
+end;
+
+function TrsVM.InvokeCode(index: integer; const Args: TArray<TValue>): TValue;
+begin
+   inc(FDepth);
+   if FDepth > FParent.FMaxStackDepth then
+      raise ErsRuntimeError.CreateFmt('Script executor stack overflow at a depth of %d frames', [FDepth]);
+   try
+      FContext.ip := @FParent.FProgram.Text[index];
+      InitializeRegs(FContext.ip^, args);
+      result := RunLoop(length(args) + 1, OP_RET); //TODO: don't do this if it's a procedure
+   finally
+      dec(FDepth);
+   end;
+end;
+
+function TrsVM.GetIP: integer;
+begin
+   result := (PByte(FContext.ip) - PByte(@FText[0])) div sizeof(TrsAsmInstruction);
+end;
+
+function TrsVM.GetSR: TValue;
+begin
+   if (FsrStack.Count = 0) or (FsrStack.Peek.Value <> FDepth) then
+      CorruptError;
+   result := FsrStack.Pop.Key;
+end;
+
+function TrsVM.GetValue(i: integer): PValue;
+begin
+   if i > 0 then
+      result := @FContext.locals[i]
+   else result := @FParent.FGlobals[-i];
+end;
+
+procedure TrsVM.InitializeReg(value: PValue; info: PTypeInfo);
+var
+   ValData: PValueData absolute value;
+begin
+   assert(not IsManaged(info));
+   if valData.FValueData <> FParent.FBlankData then
+   begin
+      //minor optimization to avoid calling AddRef and Release if possible
+      if assigned(valData.FValueData) then
+         ValData.FValueData := FParent.FBlankData
+      else pointer(ValData.FValueData) := pointer(FParent.FBlankData);
+   end;
+   ValData.FTypeInfo := info;
+   valData.FAsExtended := 0;
+end;
+
+procedure TrsVM.SetValue(i: integer; const val: TValue);
+begin
+   AssignValue(GetValue(i), @val);
+end;
+
+procedure TrsVM.SetValue(i: integer; const val: integer);
+var
+   left: PValueData;
+begin
+   pointer(left) := GetValue(i);
+   if not (assigned(left.FTypeInfo) and (left.FTypeInfo.kind = tkInteger)) then
+      InitializeReg(pointer(left), TypeInfo(integer));
+   left.FAsSLong := val;
+end;
+
+procedure TrsVM.SetValue(i: integer; const val: Extended);
+var
+   left: PValueData;
+begin
+   pointer(left) := GetValue(i);
+   if not (assigned(left.FTypeInfo) and (left.FTypeInfo.kind = tkFloat)) then
+      InitializeReg(pointer(left), TypeInfo(Extended));
+   left.FAsExtended := val;
+end;
+
+class procedure TrsVM.AssignValue(l, r: PValue);
+var
+   lData: PValueData absolute l;
+   rData: PValueData absolute r;
+begin
+   lData.FTypeInfo := rData.FTypeInfo;
+   lData.FAsExtended := rData.FAsExtended;
+   if IsManaged(rData.FTypeInfo) or (assigned(lData.FValueData) and (lData.FValueData <> TrsExec.FBlankData)) then
+      lData.FValueData := rData.FValueData
+   else pointer(lData.FValueData) := pointer(TrsExec.FBlankData);
+end;
+
+procedure TrsVM.RegState;
 var
    i: integer;
 begin
@@ -1140,16 +1216,16 @@ begin
       Writeln(format('%d: %s', [i, FContext.locals[i].ToString]));
 end;
 
-{ TrsExec.TSimpleParamList }
+{ TrsVM.TSimpleParamList }
 
-constructor TrsExec.TSimpleParamList.Create(size: integer);
+constructor TrsVM.TSimpleParamList.Create(size: integer);
 begin
    SetLength(FValues, size);
 end;
 
-procedure TrsExec.TSimpleParamList.Add(const value: TValue);
+procedure TrsVM.TSimpleParamList.Add(const value: TValue);
 begin
-   TrsExec.AssignValue(@FValues[FCount], @value);
+   TrsVM.AssignValue(@FValues[FCount], @value);
    inc(FCount);
 end;
 
