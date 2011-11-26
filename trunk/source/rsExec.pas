@@ -512,6 +512,7 @@ begin
    FParamLists.OwnsObjects := true;
    FStack := TStack<TVmContext>.Create;
    FsrStack := TStack<TsrPair>.Create;
+   FText := parent.FText;
 end;
 
 destructor TrsVM.Destroy;
