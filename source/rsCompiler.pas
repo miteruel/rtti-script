@@ -80,8 +80,8 @@ type
       function ProcessUses(const name: string; out &unit: TUnitSymbol): boolean;
       function RecursiveCompile(const name: string; const text: string): TUnitSymbol;
       procedure RecursiveUsesPanic(const name: string);
-      procedure InternalImport(const name: string; const proc: TrsCompilerRegisterProc;
-        &unit: TUnitSymbol = nil);
+      function InternalImport(const name: string; const proc: TrsCompilerRegisterProc;
+        &unit: TUnitSymbol = nil): TUnitSymbol;
       function ParseExternalHeader(const signature: string; parent: TUnitSymbol;
         add: boolean): TProcSymbol;
 
@@ -92,10 +92,12 @@ type
       procedure EnsureSysUnit;
       function Link(units: TUnitList): TrsProgram;
       procedure Reset;
+      procedure InternalCompile(const script, name: string);
    public
       constructor Create;
       destructor Destroy; override;
       function Compile(const value: string): TrsProgram;
+      procedure CompileUnit(const value: string);
       procedure RegisterStandardUnit(const name: string; const proc: TrsCompilerRegisterProc);
       procedure RegisterEnvironment(env: TClass);
       property OnUses: TUseUnitFunc read FOnUses write FOnUses;
@@ -193,6 +195,17 @@ begin
    end;
 end;
 
+procedure TrsCompiler.InternalCompile(const script, name: string);
+var
+   symbol: TUnitSymbol;
+begin
+   symbol := FParser.Parse(script, name);
+   if FUnitCache.ContainsKey(symbol.name) then
+      FUnitList.Remove(FUnitCache[symbol.name]);
+   FUnitCache.AddOrSetValue(symbol.name, symbol);
+   FUnitList.Add(symbol);
+end;
+
 function TrsCompiler.Compile(const value: string): TrsProgram;
 var
    symbol: TUnitSymbol;
@@ -209,11 +222,7 @@ begin
    units := TUnitList.Create;
    units.OwnsObjects := true;
    try
-      symbol := FParser.Parse(value, name);
-      if FUnitCache.ContainsKey(symbol.name) then
-         FUnitList.Remove(FUnitCache[symbol.name]);
-      FUnitCache.AddOrSetValue(symbol.name, symbol);
-      FUnitList.Add(symbol);
+      InternalCompile(value, name);
       if (FUseStack = nil) or (FUseStack.Count = 0) then
          result := Link(units)
       else result := nil;
@@ -223,6 +232,18 @@ begin
          Reset;
    end;
 //OutputDebugString('SAMPLING OFF');
+end;
+
+procedure TrsCompiler.CompileUnit(const value: string);
+begin
+   EnsureSysUnit;
+   if assigned(FEnvironment) then
+      FParser.SetEnvironment(rsDefs.TypeOfNativeType(FEnvironment.ClassInfo) as TClassTypeSymbol);
+   try
+      InternalCompile(value, '');
+   finally
+      Reset;
+   end;
 end;
 
 procedure TrsCompiler.AddType(info: PTypeInfo; parent: TUnitSymbol);
@@ -276,10 +297,11 @@ begin
    AddNativeType(rttiType, new);
 end;
 
-procedure TrsCompiler.InternalImport(const name: string;
-  const proc: TrsCompilerRegisterProc; &unit: TUnitSymbol = nil);
+function TrsCompiler.InternalImport(const name: string;
+  const proc: TrsCompilerRegisterProc; &unit: TUnitSymbol = nil): TUnitSymbol;
 var
    importer: TrsTypeImporter;
+   lParser: TrsParser;
 begin
    if &unit = nil then
       importer := TrsTypeImporter.Create(self, name)
@@ -287,11 +309,14 @@ begin
       assert(AnsiSameText(&unit.name, name));
       importer := TrsTypeImporter.Create(self, &unit);
    end;
+   lParser := FParser;
    try
-      FParser.Free;
       SetupParser(FUnitCache[SYSNAME]);
       proc(importer);
+      result := importer.FUnit;
    finally
+      FParser.Free;
+      FParser := lParser;
       importer.Free;
    end;
 end;
@@ -313,13 +338,14 @@ begin
       result := true
    else if FExtUnits.TryGetValue(lName, proc) then
    begin
-      InternalImport(name, proc);
+      &unit := InternalImport(name, proc);
       result := true;
    end
-   else if FOnUses(lName, text) then
+   else if assigned(FOnUses) and FOnUses(lName, text) then
    begin
-      FUnitCache.Add(lName, RecursiveCompile(name, text));
-      FUnitList.Add(FUnitCache[lName]);
+      &unit := RecursiveCompile(name, text);
+      FUnitCache.Add(lName, &unit);
+      FUnitList.Add(&unit);
       result := true;
    end
    else result := false;
