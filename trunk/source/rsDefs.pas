@@ -689,7 +689,8 @@ end;
 
 constructor TBinOpSyntax.Create(op: TBinOpKind; left, right: TTypedSyntax);
 begin
-   if (left.kind = skValue) and (right.kind <> skValue) and (left.&type.TypeInfo.Kind <> tkUString) then
+   if (left.kind = skValue) and (right.kind <> skValue) and (op in [opPlus, opMult, opAnd, opOr, opXor])
+      and (left.&type.TypeInfo.Kind <> tkUString) then
       Create(op, right, left)
    else begin
       inherited Create(skBinOp);
@@ -713,10 +714,25 @@ end;
 
 { TBoolOpSyntax }
 
+function InvertBoolOp(op: TBoolOpKind): TBoolOpKind;
+begin
+   case op of
+      opGreaterEqual: result := opLessThan;
+      opLessEqual: result := opGreaterThan;
+      opGreaterThan: result := opLessEqual;
+      opLessThan: result := opGreaterEqual;
+      opEquals: result := opNotEqual;
+      opNotEqual: result := opEquals;
+      opBoolXor: result := opBoolXor;
+      else raise EParseError.Create('Invalid boolean operation');
+   end;
+end;
+
 constructor TBoolOpSyntax.Create(op: TBoolOpKind; left, right: TTypedSyntax);
 begin
-   if (left.kind = skValue) and (right.kind <> skValue) then
-      Create(op, right, left)
+   if (left.kind = skValue) and (right.kind <> skValue) and
+      (op in [opGreaterEqual, opLessEqual, opGreaterThan, opLessThan, opEquals, opNotEqual, opBoolXor]) then
+      Create(InvertBoolOp(op), right, left)
    else begin
       inherited Create(skBoolOp);
       FOp := op;
