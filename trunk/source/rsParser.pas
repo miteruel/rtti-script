@@ -2393,7 +2393,12 @@ begin
    setQueue(input);
    FEofExpected := true;
    FCurrentUnit := parent;
-   result := ReadForwardProc(add);
+   FScopeStack.Push(parent.privates);
+   try
+      result := ReadForwardProc(add);
+   finally
+      FScopeStack.Pop;
+   end;
 end;
 
 end.
