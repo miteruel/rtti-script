@@ -876,7 +876,7 @@ begin
       setLength(values, TArraySyntax(value).subvalues.children.Count);
       for i := 0 to high(values) do
          values[i] := TValueSyntax(TArraySyntax(value).subvalues.children[i]).value;
-      newVal := TValueSyntax.Create(TValue.FromArray(MakeArrayPropType(value.&type).TypeInfo, values));
+      newVal := TValueSyntax.Create(TValue.FromArray(value.&type.TypeInfo, values));
       value.Free;
       value := newVal;
    end;
@@ -1627,16 +1627,20 @@ function TrsParser.ParseCall(sym: TProcSymbol; selfSymbol: TVarSymbol): TCallSyn
 var
    param: TTypedSyntax;
    params: TObjectList<TTypedSyntax>;
+   i: integer;
 begin
    Next; //skip function name
    params := TObjectList<TTypedSyntax>.Create;
    params.OwnsObjects := true;
    try
+      i := ord(assigned(selfSymbol));
       if Check(tkOpenParen) and not Check(tkCloseParen) then
          repeat
             param := ReadExpression;
-            EvalExpression(param, false);
-            params.Add(param)
+            if sym.paramList[i].&Type.TypeInfo.Kind <> TypInfo.tkSet then
+               EvalExpression(param, false);
+            params.Add(param);
+            inc(i);
          until Expect([tkCloseParen, tkComma]) = tkCloseParen;
       if assigned(selfSymbol) then
          params.Insert(0, TVariableSyntax.Create(selfSymbol));
