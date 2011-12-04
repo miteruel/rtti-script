@@ -73,6 +73,15 @@ begin
    else clsType := TypeOfRttiType(rType) as TExternalClassType;
    table.Add(UpperCase(rType.Name), clsType);
 
+   rType := ctx.GetType(TInterfacedObject) as TRttiInstanceType;
+   if not NativeTypeDefined(rType) then
+   begin
+      clsType := TExternalClassType.Create(rType);
+      AddNativeType(rType, clsType);
+   end
+   else clsType := TypeOfRttiType(rType) as TExternalClassType;
+   table.Add(UpperCase(rType.Name), clsType);
+
    stringType := TypeOfNativeType(TypeInfo(string));
 
    rType := ctx.GetType(Exception) as TRttiInstanceType;

@@ -99,7 +99,8 @@ type
       function Compile(const value: string): TrsProgram;
       procedure CompileUnit(const value: string);
       procedure RegisterStandardUnit(const name: string; const proc: TrsCompilerRegisterProc);
-      procedure RegisterEnvironment(env: TClass);
+      function RegisterEnvironment(env: TClass): TExternalClassType;
+      function GetUnit(const name: string): TUnitSymbol;
       property OnUses: TUseUnitFunc read FOnUses write FOnUses;
    end;
 
@@ -152,6 +153,11 @@ begin
          InternalImport(SYSNAME, FExtUnits[SYSNAME], FUnitCache[SYSNAME]);
       FSysSetup := true;
    end;
+end;
+
+function TrsCompiler.GetUnit(const name: string): TUnitSymbol;
+begin
+   result := FUnitCache[name];
 end;
 
 function TrsCompiler.Link(units: TUnitList): TrsProgram;
@@ -339,6 +345,7 @@ begin
    else if FExtUnits.TryGetValue(lName, proc) then
    begin
       &unit := InternalImport(name, proc);
+      FUnitCache.Add(lName, &unit);
       result := true;
    end
    else if assigned(FOnUses) and FOnUses(lName, text) then
@@ -388,12 +395,13 @@ begin
    end;
 end;
 
-procedure TrsCompiler.RegisterEnvironment(env: TClass);
+function TrsCompiler.RegisterEnvironment(env: TClass): TExternalClassType;
 begin
    EnsureSysUnit;
    if not NativeTypeDefined(TRttiContext.Create.GetType(env.ClassInfo)) then
       self.AddType(env.ClassInfo, FUnitCache[SYSNAME]);
    FEnvironment := env;
+   result := TypeOfNativeType(env.ClassInfo) as TExternalClassType
 end;
 
 procedure TrsCompiler.RegisterStandardUnit(const name: string; const proc: TrsCompilerRegisterProc);
