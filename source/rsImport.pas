@@ -28,6 +28,7 @@ type
    TTypeRegisterProc = reference to procedure(value: TRttiType);
    TParseHeaderFunc = reference to function(const header: string;
      parent: TUnitSymbol; add: boolean): TProcSymbol;
+   NoImportAttribute = class(TCustomAttribute);
 
    IExternalType = interface
    ['{D1A64764-87B2-48EF-B2FC-641D31C3856A}']
@@ -159,6 +160,16 @@ constructor TExternalClassType.Create(info: TRttiInstanceType; LookupType: TType
          AddType(val);
    end;
 
+   function NoImport(obj: TRttiObject): boolean;
+   var
+      attr: TCustomAttribute;
+   begin
+      for attr in obj.GetAttributes do
+         if attr is NoImportAttribute then
+            exit(true);
+      result := false;
+   end;
+
 var
    method: TRttiMethod;
    prop: TRttiProperty;
@@ -179,6 +190,8 @@ begin
          Continue;
       if method.IsDestructor then
          Continue;
+      if NoImport(method) then
+         Continue;
       if assigned(method.ReturnType) then
       begin
          EnsureType(method.ReturnType);
@@ -194,6 +207,8 @@ begin
    end;
    for prop in info.GetDeclaredProperties do
    begin
+      if NoImport(prop) then
+         Continue;
       EnsureType(prop.PropertyType);
       self.AddProp(prop as TRttiInstanceProperty);
    end;

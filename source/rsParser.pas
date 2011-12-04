@@ -890,6 +890,11 @@ begin
    right := TBinOpSyntax(value).right;
    EvalExpression(left, constOnly);
    EvalExpression(right, constOnly);
+   if left <> TBinOpSyntax(value).left then
+      TBinOpSyntax(value).ResetLeft(left);
+   if right <> TBinOpSyntax(value).right then
+      TBinOpSyntax(value).ResetRight(right);
+
    if (left.kind = skValue) and (right.kind = skValue) then
    begin
       try
@@ -939,7 +944,9 @@ begin
    main := value as TUnOpSyntax;
    sub := main.sub;
    evalExpression(sub, constOnly);
-   if not (sub.kind in [skValue, skBinOp, skUnOp, skVariable]) then
+   if sub <> main.sub then
+      main.resetSub(sub);
+   if not (sub.kind in [skValue, skBinOp, skUnOp, skVariable, skArrayProp]) then
       raise EParseError.Create('Invalid operation');
    if sub.kind = skValue then
    begin
@@ -1627,17 +1634,20 @@ function TrsParser.ParseCall(sym: TProcSymbol; selfSymbol: TVarSymbol): TCallSyn
 var
    param: TTypedSyntax;
    params: TObjectList<TTypedSyntax>;
-   i: integer;
+   i, count: integer;
 begin
    Next; //skip function name
    params := TObjectList<TTypedSyntax>.Create;
    params.OwnsObjects := true;
    try
       i := ord(assigned(selfSymbol));
+      if assigned(sym.ParamList) then
+         count := sym.paramList.Count
+      else count := 0;
       if Check(tkOpenParen) and not Check(tkCloseParen) then
          repeat
             param := ReadExpression;
-            if sym.paramList[i].&Type.TypeInfo.Kind <> TypInfo.tkSet then
+            if (i < count) and (sym.paramList[i].&Type.TypeInfo.Kind <> TypInfo.tkSet) then
                EvalExpression(param, false);
             params.Add(param);
             inc(i);

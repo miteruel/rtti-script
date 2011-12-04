@@ -348,6 +348,8 @@ type
    public
       constructor Create(op: TBinOpKind; left, right: TTypedSyntax);
       destructor Destroy; override;
+      procedure ResetLeft(value: TTypedSyntax);
+      procedure ResetRight(value: TTypedSyntax);
       property op: TBinOpKind read FOp;
       property left: TTypedSyntax read FLeft;
       property right: TTypedSyntax read FRight;
@@ -377,6 +379,7 @@ type
    public
       constructor Create(op: TUnOpKind; sub: TTypedSyntax);
       destructor Destroy; override;
+      procedure resetSub(value: TTypedSyntax);
       property op: TUnOpKind read FOp;
       property sub: TTypedSyntax read FSub;
    end;
@@ -712,6 +715,16 @@ begin
    result := FLeft.GetType; //TODO: check for left: integer, right: float case
 end;
 
+procedure TBinOpSyntax.ResetLeft(value: TTypedSyntax);
+begin
+   FLeft := value;
+end;
+
+procedure TBinOpSyntax.ResetRight(value: TTypedSyntax);
+begin
+   FRight := value;
+end;
+
 { TBoolOpSyntax }
 
 function InvertBoolOp(op: TBoolOpKind): TBoolOpKind;
@@ -903,6 +916,11 @@ end;
 function TUnOpSyntax.GetType: TTypeSymbol;
 begin
    result := FSub.GetType;
+end;
+
+procedure TUnOpSyntax.resetSub(value: TTypedSyntax);
+begin
+   FSub := value;
 end;
 
 { TTypeSymbol }
