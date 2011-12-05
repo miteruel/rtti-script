@@ -1609,7 +1609,9 @@ begin
    begin
       info := expected[i].&Type.TypeInfo;
       param := passed[i];
-      if (info.kind = TypInfo.tkSet) and (param.kind in [skValue, skArray]) then
+      if (info.kind = TypInfo.tkSet) and (param.kind in [skValue, skArray])
+        and ((param.&type = TypeOfNativeType(nil)) or
+        not ((param.kind = skValue) and (TValueSyntax(param).value.Kind = TypInfo.tkSet))) then
       begin
          param := ArrayToSet(param, expected[i].&Type.TypeInfo);
          passed.Delete(i);
