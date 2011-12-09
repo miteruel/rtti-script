@@ -214,7 +214,6 @@ end;
 
 function TrsCompiler.Compile(const value: string): TrsProgram;
 var
-   symbol: TUnitSymbol;
    name: string;
    units: TUnitList;
 begin
