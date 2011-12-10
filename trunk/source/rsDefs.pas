@@ -460,6 +460,7 @@ type
       constructor Create(proc: TProcSymbol; const params: TList<TTypedSyntax>);
       destructor Destroy; override;
       function GetSelfValue: TVarSymbol; override;
+      procedure ClearSelf;
       property proc: TProcSymbol read FProc;
       property params: TList<TTypedSyntax> read FParams;
       property SelfSymbol: TTypedSyntax read FSelfSymbol write SetSelf;
@@ -1387,6 +1388,12 @@ begin
    FSelfSymbol := Value;
 end;
 
+procedure TCallSyntax.ClearSelf;
+begin
+   assert(assigned(FSelfSymbol));
+   FreeAndNil(FSelfSymbol);
+end;
+
 { TTryCallSyntax }
 
 constructor TTryCallSyntax.Create(const jump, ret: string);
@@ -1492,6 +1499,8 @@ begin
    inherited Create(skDot);
    FLeft := left;
    FRight := right;
+   if FRight.kind = skCall then
+      TCallSyntax(FRight).ClearSelf;
 end;
 
 destructor TDotSyntax.Destroy;
@@ -1846,11 +1855,11 @@ const
       (keyword: 'ON'; token: tkOn), (keyword: 'OR'; token: tkOr),
       (keyword: 'OUT'; token: tkOut), (keyword: 'OVERRIDE'; token: tkOverride),
       (keyword: 'DEFAULT'; token: tkDefault), (keyword: 'PRIVATE'; token: tkPrivate),
-      (keyword: 'PROCEDURE'; token: tkProcedure), (keyword: 'PROPERTY'; token: tkProperty),
-      (keyword: 'PROTECTED'; token: tkProtected), (keyword: 'PUBLIC'; token: tkPublic),
-      (keyword: 'RAISE'; token: tkRaise),
+      (keyword: 'PROCEDURE'; token: tkProcedure), (keyword: 'PROGRAM'; token: tkProgram),
+      (keyword: 'PROPERTY'; token: tkProperty), (keyword: 'PROTECTED'; token: tkProtected),
+      (keyword: 'PUBLIC'; token: tkPublic), (keyword: 'RAISE'; token: tkRaise),
       (keyword: 'RECORD'; token: tkRecord), (keyword: 'REPEAT'; token: tkRepeat),
-      (keyword: 'SCRIPT'; token: tkProgram), (keyword: 'SET'; token: tkSet),
+      (keyword: 'SET'; token: tkSet),
       (keyword: 'SHL'; token: tkShl), (keyword: 'SHR'; token: tkShr),
       (keyword: 'THEN'; token: tkThen), (keyword: 'TO'; token: tkTo),
       (keyword: 'TRY'; token: tkTry), (keyword: 'TYPE'; token: tkType),

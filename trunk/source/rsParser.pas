@@ -90,6 +90,7 @@ type
       procedure ParseInterface;
       procedure ParseImplementation;
       function ParseUnit(const ExpectedName: string): TUnitSymbol;
+      function ParseProgram(const ExpectedName: string): TUnitSymbol;
       procedure Next;
       function DoParse(const ExpectedName: string): TUnitSymbol;
       procedure ParseUses;
@@ -2353,13 +2354,34 @@ begin
    end;
 end;
 
+function TrsParser.ParseProgram(const ExpectedName: string): TUnitSymbol;
+begin
+   Verify(tkIdentifier);
+   if (ExpectedName <> '') and (not AnsiSameText(ExpectedName, FCurrent.origText)) then
+      raise EParseError.CreateFmt('Program name "%s" does not match filename "%s"', [FCurrent.origText, ExpectedName]);
+   result := TUnitSymbol.Create(FCurrent.origText, FPublicSymbols, FPrivateSymbols);
+   FCurrentUnit := result;
+   try
+      Next;
+      Expect(tkSem);
+      ParseImplBody;
+      Expect(tkBegin);
+      Expect(tkEnd);
+      FEofExpected := true;
+      Expect(tkDot);
+   except
+      result.Free;
+      raise;
+   end;
+end;
+
 function TrsParser.DoParse(const ExpectedName: string): TUnitSymbol;
 begin
 //OutputDebugString('SAMPLING ON');
    try
       FSemCount := 0;
       case Expect([tkProgram, tkUnit]) of
-         tkProgram: raise EParseError.Create('Program parsing is not supported yet'); //TODO: support this
+         tkProgram: result := ParseProgram(ExpectedName);
          tkUnit: result := ParseUnit(ExpectedName);
          else raise EParseError.CreateFmt('Unknown token: %s', [FCurrent.origText]);
       end;

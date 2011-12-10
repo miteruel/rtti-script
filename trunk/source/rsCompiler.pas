@@ -345,6 +345,7 @@ begin
    begin
       &unit := InternalImport(name, proc);
       FUnitCache.Add(lName, &unit);
+      FUnitList.Add(&unit);
       result := true;
    end
    else if assigned(FOnUses) and FOnUses(lName, text) then
