@@ -40,6 +40,7 @@ type
       FConstTable: TStringList;
       FLocals: TStringList;
       FCurrent: TrsScriptUnit;
+      FCurrentUnit: TUnitSymbol;
       FFreeReg: integer;
       FTempReg: integer;
       FTempList: TList<integer>;
@@ -47,6 +48,7 @@ type
       FTryStack: TStack<TPair<TSyntaxKind, integer>>;
       FUnresStack: TStack<TPair<string, TReferenceType>>;
       FDebug: boolean;
+      FCurrentLine: integer;
 
       function NextReg(temp: integer = 0): integer;
       procedure Write(const opcode: TrsAsmInstruction);
@@ -93,7 +95,9 @@ type
       function ResolveCall(const name: string; position: integer): integer;
       procedure ResolveUnitLocalCalls(&unit: TUnitSymbol);
       procedure SetupUnitGlobals(&unit: TUnitSymbol; rsu: TrsScriptUnit);
+      procedure SetupUnitProperties(&unit: TUnitSymbol; rsu: TrsScriptUnit);
       procedure SetupLocals(proc: TProcSymbol);
+      procedure SetupUnitExternalClasses(&unit: TUnitSymbol; rsu: TrsScriptUnit);
       procedure PopUnres;
       function ShortCircuitEval(value: TBoolOpSyntax): TrsAsmInstruction;
       procedure AssignConst(lvalue: TVariableSyntax; rvalue: TValueSyntax);
@@ -109,9 +113,9 @@ type
 
 implementation
 uses
-Windows,
+   Windows, RTTI, Math,
    SysUtils, StrUtils, TypInfo,
-   rsEnex,
+   rsEnex, rsImport,
    vmtBuilder, newClass;
 
 { TrsMethodFlattener }
@@ -169,6 +173,7 @@ procedure TrsCodegen.Write(const opcode: TrsAsmInstruction);
 begin
    assert(opcode.op in [low(TrsOpcode)..High(TrsOpcode)]);
    FCurrent.Text.Add(opcode);
+   FCurrent.OpcodeMap.Add(FCurrentLine);
 end;
 
 procedure TrsCodegen.WriteOp(opcode: TrsOpcode; left, right: integer);
@@ -314,7 +319,8 @@ begin
    begin
       result.op := OP_MOVP;
       result.left := NextReg(value.sem);
-      result.right := TPropSymbol(value.symbol).index;
+      result.right := -1;
+      FCurrent.Unresolved.Add(TUnresolvedReference.Create(TPropSymbol(value.symbol).fullName, FCurrent.Text.Count, rtProp));
    end
    else if value.&type = BooleanType then
    begin
@@ -474,7 +480,7 @@ var
    left: integer;
    param: TTypedSyntax;
 begin
-   WriteOp(OP_LIST);
+   WriteOp(OP_LIST, value.params.Count);
    for param in value.params do
       PushParam(param);
 
@@ -486,7 +492,8 @@ begin
 
    result.op := OP_MVAP;
    result.left := NextReg(value.sem);
-   result.right := ((Base.Right as TVariableSyntax).Symbol as TPropSymbol).index;
+   result.right := -1;
+   FCurrent.Unresolved.Add(TUnresolvedReference.Create(((Base.Right as TVariableSyntax).Symbol as TPropSymbol).readSpec.fullName, FCurrent.Text.Count, rtArrayProp));
 end;
 
 function TrsCodegen.Eval(value: TTypedSyntax): integer;
@@ -531,6 +538,7 @@ begin
       begin
          result := FTempQueue.Dequeue;
          FTempList.Add(result);
+         FFreeReg := max(FFreeReg, result);
          Exit;
       end;
    end;
@@ -572,14 +580,16 @@ var
    sr: integer;
    param: TTypedSyntax;
 begin
-   WriteOp(OP_LIST);
+   WriteOp(OP_LIST, lValue.params.Count);
    for param in lValue.params do
       PushParam(param);
    sr := Eval(lValue.base.left);
    if sr = -1 then
       PopUnres;
    WriteOp(OP_SRLD, sr);
-   WriteOp(OP_APSN, ((lValue.base.Right as TVariableSyntax).Symbol as TPropSymbol).index, rValue);
+
+   FCurrent.Unresolved.Add(TUnresolvedReference.Create(((lValue.base.Right as TVariableSyntax).Symbol as TPropSymbol).WriteSpec.fullName, FCurrent.Text.Count, rtArrayProp));
+   WriteOp(OP_APSN, -1, rValue);
 end;
 
 {
@@ -597,7 +607,8 @@ var
 begin
    WriteOp(OP_SRLD, selfVal);
    propSym := prop.symbol as TPropSymbol;
-   WriteOp(OP_PASN, propSym.index, rValue);
+   FCurrent.Unresolved.Add(TUnresolvedReference.Create(propSym.fullName, FCurrent.Text.Count, rtProp));
+   WriteOp(OP_PASN, -1, rValue);
 end;
 
 procedure TrsCodegen.AssignElemProp(selfVal, rValue: integer; prop: TElemSyntax);
@@ -814,6 +825,7 @@ procedure TrsCodegen.ProcessProc(proc: TProcSymbol);
 var
    syntax: TSyntax;
    start: integer;
+   dummy: integer;
 begin
    SetupLocals(proc);
    start := FCurrent.Text.Count;
@@ -821,6 +833,8 @@ begin
    FFreeReg := FLocals.Count;
    for syntax in proc.syntax.children do
    begin
+      if FCurrentUnit.LineMap.TryGetValue(syntax, dummy) then
+         FCurrentLine := dummy;
       if syntax is TTypedSyntax then
          Eval(TTypedSyntax(syntax))
       else case syntax.kind of
@@ -881,6 +895,55 @@ begin
    table.Clear;
 end;
 
+procedure TrsCodegen.SetupUnitProperties(&unit: TUnitSymbol; rsu: TrsScriptUnit);
+var
+   proplist: TList<TPair<string, TSymbol>>;
+   pair: TPair<string, TSymbol>;
+   symbol: TSymbol;
+   cls: TClassTypeSymbol;
+   props: TArray<TRttiProperty>;
+   prop, found: TRttiProperty;
+   propSym: TPropSymbol;
+   ctx: TRttiContext;
+begin
+   ctx := TRttiContext.Create;
+   for symbol in &unit.privates.Values do
+      if (symbol.kind = syType) and (symbol is TClassTypeSymbol) then
+      begin
+         cls := TClassTypeSymbol(symbol);
+         proplist := cls.GetSymbolTable.Where(
+            function(name: string; value: TSymbol): boolean
+            begin result := (value.kind = syProp) end);
+         props := ctx.GetType(cls.metaclass.ClassInfo).GetDeclaredProperties;
+         try
+            for pair in propList do
+            begin
+               propSym := TPropSymbol(pair.Value);
+               if assigned(propSym.paramList) and (propSym.paramList.Count > 0) then
+               begin
+                  if assigned(propSym.readSpec) then
+                     rsu.ArrayProps.Add(propSym.readSpec.fullName);
+                  if assigned(propSym.writeSpec) then
+                     rsu.ArrayProps.Add(propSym.writeSpec.fullName);
+               end
+               else begin
+                  found := nil;
+                  for prop in props do
+                     if AnsiSameText(prop.Name, propSym.name)then
+                     begin
+                        found := prop;
+                        Break;
+                     end;
+                  assert(assigned(found));
+                  rsu.properties.AddObject(propSym.fullName, found);
+               end;
+            end;
+         finally
+            proplist.Free;
+         end;
+      end;
+end;
+
 procedure TrsCodegen.SetupUnitGlobals(&unit: TUnitSymbol; rsu: TrsScriptUnit);
 var
    list: TList<TPair<string, TSymbol>>;
@@ -899,6 +962,24 @@ begin
    end;
 end;
 
+procedure TrsCodegen.SetupUnitExternalClasses(&unit: TUnitSymbol; rsu: TrsScriptUnit);
+var
+   list: TList<TPair<string, TSymbol>>;
+   pair: TPair<string, TSymbol>;
+begin
+   list := &unit.privates.Where(
+      function(name: string; value: TSymbol): boolean
+      begin
+         result := (value.kind = syType) and (TTypeSymbol(value) is TExternalClassType)
+      end);
+   try
+      for pair in list do
+         rsu.ExtClasses.Add(TExternalClassType(pair.Value).metaclass);
+   finally
+      list.free;
+   end;
+end;
+
 function TrsCodegen.Process(&unit: TUnitSymbol): TrsScriptUnit;
 var
    procs: TList<TProcSymbol>;
@@ -909,6 +990,7 @@ begin
    result := TrsScriptUnit.Create(&unit.name, &unit.IsExternal);
    try
       FCurrent := result;
+      FCurrentUnit := &unit;
       index := 0;
       procs := &unit.procs;
       try
@@ -924,6 +1006,8 @@ begin
                                                                 proc.parent = &unit));
          end;
          SetupUnitGlobals(&unit, result);
+         SetupUnitProperties(&unit, result);
+         SetupUnitExternalClasses(&unit, result);
          if not &unit.IsExternal then
             ResolveUnitLocalCalls(&unit);
       finally

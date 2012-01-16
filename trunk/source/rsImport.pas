@@ -21,14 +21,14 @@ unit rsImport;
 interface
 uses
    RTTI, TypInfo,
-   rsDefs;
+   rsDefs, rsDefsBackend;
 
 type
    TTypeLookupFunc = reference to function(base: TRttiType): TTypeSymbol;
    TTypeRegisterProc = reference to procedure(value: TRttiType);
    TParseHeaderFunc = reference to function(const header: string;
      parent: TUnitSymbol; add: boolean): TProcSymbol;
-   NoImportAttribute = class(TCustomAttribute);
+   NoImportAttribute = rsDefsBackend.NoImportAttribute;
 
    IExternalType = interface
    ['{D1A64764-87B2-48EF-B2FC-641D31C3856A}']
@@ -102,6 +102,7 @@ var
 begin
    assert(assigned(info));
    inherited Create(info.Name);
+   self.metaclass := info.MetaclassType;
    FInfo := info;
    FFieldCount := (length(info.GetFields));
    if NativeTypeDefined(info.BaseType) then
@@ -129,8 +130,8 @@ begin
    begin
       list := EmptyParamList;
       list.Add(TParamSymbol.Create('index', indexTypeSym, [pfConst]));
-      AddMethod(format('Get%s', [name]), propTypeSym, mvPrivate, false, list);
-      readSpec := self.SymbolLookup(UpperCase(format('Get%s', [name])));
+      AddMethod(format('Get*%s', [name]), propTypeSym, mvPrivate, false, list);
+      readSpec := self.SymbolLookup(UpperCase(format('Get*%s', [name])));
    end
    else readSPec := nil;
    if canWrite then
@@ -138,8 +139,8 @@ begin
       list := EmptyParamList;
       list.Add(TParamSymbol.Create('index', indexTypeSym, [pfConst]));
       list.Add(TParamSymbol.Create('value', propTypeSym, [pfConst]));
-      AddMethod(format('Set%s', [name]), nil, mvPrivate, false, list);
-      writeSpec := self.SymbolLookup(UpperCase(format('Set%s', [name])));
+      AddMethod(format('Set*%s', [name]), nil, mvPrivate, false, list);
+      writeSpec := self.SymbolLookup(UpperCase(format('Set*%s', [name])));
    end
    else writeSpec := nil;
    list := EmptyParamList;

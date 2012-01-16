@@ -53,10 +53,12 @@ type
       function ReadChar: TToken;
       procedure ScanHex;
       function ReadString: TToken;
+      function IsEof: boolean;
    public
       function Lex(const text: string): TTokenQueue; overload;
       procedure Lex(var token: TToken); overload;
       procedure Load(const text: string);
+      property EOF: boolean read IsEof;
    end;
 
    EEndOfFile = class(Exception);
@@ -184,6 +186,11 @@ end;
 function TRsLexer.IsAlphaNumeric(C: Char): Boolean;
 begin
    Result := TCharacter.IsLetterOrDigit(C) or (C = '_');
+end;
+
+function TRsLexer.IsEof: boolean;
+begin
+   result := FStart^ = #0;
 end;
 
 function TRsLexer.ReadIdentifier: TToken;

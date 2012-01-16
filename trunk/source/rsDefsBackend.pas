@@ -121,7 +121,16 @@ type
       isExternal, standalone: boolean;
    end;
 
-   TReferenceType = (rtVar, rtCall, rtType);
+   TrsDebugLineInfo = record
+      &Unit: string;
+      line: integer;
+      constructor Create(const aUnit: string; aLine: integer);
+      class operator Equal(const l, r: TrsDebugLineInfo): boolean;
+      class operator NotEqual(const l, r: TrsDebugLineInfo): boolean; inline;
+   end;
+
+   TReferenceType = (rtVar, rtCall, rtType, rtProp, rtArrayProp);
+
    TUnresolvedReference = class
    private
       FName: string;
@@ -146,9 +155,14 @@ type
       FExternal: boolean;
       FGlobals: TStringList;
       FUnit: INewUnit;
+      FArrayProperties: TStringList;
+      FExtClasses: TList<TClass>;
+      FProperties: TStringList;
+      FOpcodeMap: TList<integer>;
    public
       constructor Create(const name: string; isExternal: boolean);
       destructor Destroy; override;
+
       property name: string read FName;
       property nameDot: string read FNameDot; //performance optimization for codegen and link time
       property Text: TList<TrsAsmInstruction> read FText;
@@ -157,6 +171,10 @@ type
       property Routines: TDictionary<string, TrsProcInfo> read FRoutines;
       property IsExternal: boolean read FExternal;
       property Globals: TStringList read FGlobals;
+      property ArrayProps: TStringLIst read FArrayProperties;
+      property ExtClasses: TList<TClass> read FExtClasses;
+      property Properties: TStringList read FProperties;
+      property OpcodeMap: TList<integer> read FOpcodeMap;
       property &Unit: INewUnit read FUnit;
    end;
 
@@ -166,9 +184,13 @@ type
       FRoutines: TDictionary<string, TrsProcInfo>;
       FGlobals: TStringList;
       FConstants: TStringList;
+      FArrayProperties: TStringList;
       FScriptClasses: TList<TNewClass>;
       FPackage: IRttiPackage;
       FUnits: TList<INewUnit>;
+      FExtClasses: TList<TClass>;
+      FProperties: TStringList;
+      FOpcodeMap: TList<TrsDebugLineInfo>;
       procedure SetConstants(const Value: TStringList);
    public
       constructor Create;
@@ -182,6 +204,11 @@ type
       property Globals: TStringList read FGlobals;
       property Constants: TStringList read FConstants write SetConstants;
       property ScriptClasses: TList<TNewClass> read FScriptClasses;
+      property ExtClasses: TList<TClass> read FExtClasses;
+      property ArrayProps: TStringList read FArrayProperties;
+      property Properties: TStringList read FProperties;
+      property OpcodeMap: TList<TrsDebugLineInfo> read FOpcodeMap;
+      property package: IRttiPackage read FPackage;
    end;
 
    PValue = ^TValue;
@@ -194,6 +221,8 @@ type
       constructor Create;
       procedure Add(const key: TKey; const value: TValue);
    end;
+
+   NoImportAttribute = class(TCustomAttribute);
 
 implementation
 
@@ -210,10 +239,18 @@ begin
    FUnresolvedCalls := TUnresList.Create(true);
    FGlobals := TStringList.Create;
    FUnit := TRttiNewUnit.Create(name);
+   FArrayProperties := TStringList.Create;
+   FExtClasses := TList<TClass>.Create;
+   FProperties := TStringList.Create;
+   FOpcodeMap := TList<integer>.Create;
 end;
 
 destructor TrsScriptUnit.Destroy;
 begin
+   FOpcodeMap.Free;
+   FProperties.Free;
+   FExtClasses.Free;
+   FArrayProperties.Free;
    FUnresolvedCalls.Free;
    FUnresolved.Free;
    FGlobals.Free;
@@ -250,10 +287,18 @@ begin
    FGlobals.Add('');
    FScriptClasses := TList<TNewClass>.Create;
    FUnits := TList<INewUnit>.Create;
+   FProperties := TStringList.Create;
+   FArrayProperties := TStringList.Create;
+   FExtClasses := TList<TClass>.Create;
+   FOpcodeMap := TList<TrsDebugLineInfo>.Create;
 end;
 
 destructor TrsProgram.Destroy;
 begin
+   FOpcodeMap.Free;
+   FExtClasses.Free;
+   FArrayProperties.Free;
+   FProperties.Free;
    FUnits.Free;
    FScriptClasses.Free;
    FRoutines.Free;
@@ -297,6 +342,24 @@ begin
       inherited Add(key, list);
    end;
    list.Add(value);
+end;
+
+{ TrsDebugLineInfo }
+
+constructor TrsDebugLineInfo.Create(const aUnit: string; aLine: integer);
+begin
+   self.&Unit := aUnit;
+   self.line := aLine;
+end;
+
+class operator TrsDebugLineInfo.Equal(const l, r: TrsDebugLineInfo): boolean;
+begin
+   result := (l.&unit = r.&unit) and (l.line = r.line);
+end;
+
+class operator TrsDebugLineInfo.NotEqual(const l, r: TrsDebugLineInfo): boolean;
+begin
+   result := not (l = r);
 end;
 
 end.
