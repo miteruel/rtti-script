@@ -1699,6 +1699,7 @@ begin
    try
       branch := NewBranch;
       result.Add(cond);
+      FCurrentUnit.LineMap.Add(cond, FCurrent.row);
       branch2 := NewBranch;
       result.Add(TJumpSyntax.Create(branch2, true));
       if FCurrent.kind <> tkElse then
@@ -1761,6 +1762,7 @@ end;
 function TrsParser.ParseCase(const breakTo, continueTo, exitTo: string): TBlockSyntax;
 var
    cond: TTypedSyntax;
+   asn: TassignmentSyntax;
    action: TBlockSyntax;
    value: TVarSymbol;
    endpoint, nextCase: string;
@@ -1772,7 +1774,9 @@ begin
    try
       value := TVarSymbol.Create(NextCondName, cond.&type, FCurrentProc);
       AddSymbol(value.name, value);
-      result.Add(TAssignmentSyntax.Create(TVariableSyntax.Create(value), cond));
+      asn := TAssignmentSyntax.Create(TVariableSyntax.Create(value), cond);
+      FCurrentUnit.LineMap.Add(asn, FCurrent.row);
+      result.Add(asn);
       nextCase := '';
       endpoint := NewBranch;
       repeat //TODO: optimize CASE codegen
@@ -1812,6 +1816,7 @@ var
    lBound, uBound: TTypedSyntax;
    uSymbol: TVarSymbol;
    down: boolean;
+   asn: TAssignmentSyntax;
 begin
    //TODO: Check to be sure index is an ordinal type
    uBound := nil;
@@ -1823,7 +1828,9 @@ begin
       uBound := ReadExpression(tkDo);
       EvalExpression(lBound, false);
       EvalExpression(uBound, false);
-      result.Add(TAssignmentSyntax.Create(TVariableSyntax.Create(index), lBound));
+      asn := TAssignmentSyntax.Create(TVariableSyntax.Create(index), lBound);
+      FCurrentUnit.LineMap.Add(asn, FCurrent.row);
+      result.Add(asn);
 
       //Make sure that the upper bound is only evaluated at the top of the loop
       //and not on every trip through it
@@ -2021,6 +2028,7 @@ function TrsParser.ReadFinallyBlock(const breakTo, continueTo, exitTo,
   internalBreak, internalCont, internalExit: string): TBlockSyntax;
 var
    start, finish: string;
+   ret: TSyntax;
 begin
    inc(FFinallyDepth);
    result := TBlockSyntax.Create;
@@ -2032,7 +2040,9 @@ begin
          result.Add(TFinallySyntax.Create(finish));
          while not check(tkEnd) do
             result.Add(ReadLineOrBlock('', '', ''));
-         result.Add(TSyntax.Create(skReturn));
+         ret := TSyntax.Create(skReturn);
+         result.Add(ret);
+         FCurrentUnit.LineMap.Add(ret, FCurrent.row);
          result.Add(CreateTryEndingNavigation(start, breakTo, continueTo,
            exitTo, internalBreak, internalCont, internalExit));
          result.Add(TLabelSyntax.Create(finish));
@@ -2088,6 +2098,7 @@ var
    start, finish, endHandler, next: string;
    exc: TExceptSyntax;
    elseBlock: TBlockSyntax;
+   ret: TSyntax;
 begin
    inc(FExceptDepth);
    result := TBlockSyntax.Create;
@@ -2121,7 +2132,9 @@ begin
          end
          else expect(tkEnd);
          result.Add(TLabelSyntax.Create(endHandler));         
-         result.Add(TSyntax.Create(skReturn));
+         ret := TSyntax.Create(skReturn);
+         result.Add(ret);
+         FCurrentUnit.LineMap.Add(ret, FCurrent.row);
          result.Add(CreateTryEndingNavigation(start, breakTo, continueTo,
            exitTo, internalBreak, internalCont, internalExit));
          result.Add(TLabelSyntax.Create(finish));
@@ -2195,7 +2208,10 @@ begin
 end;
    
 function TrsParser.ParseStatement(const breakTo, continueTo, exitTo: string): TSyntax;
+var
+   line: integer;
 begin
+   line := FCurrent.row;
    case FCurrent.kind of
       tkIdentifier:
       begin
@@ -2217,6 +2233,7 @@ begin
       tkExit: result := DoExit(exitTo);
       else raise EParseError.Create('Statement expected');
    end;
+   FCurrentUnit.LineMap.Add(result, line);
 end;
 
 function TrsParser.ParseStatementList(const breakTo, continueTo, exitTo: string): TSyntaxList;
@@ -2272,12 +2289,15 @@ end;
 procedure TrsParser.ReadProcBody(proc: TProcSymbol);
 var
    exitTo: string;
+   ret: TSyntax;
 begin
    exitTo := NewBranch;
    proc.syntax := ParseCompoundStatement('', '', exitTo);
    expect(tkSem);
    proc.syntax.Add(TLabelSyntax.Create(exitTo));
-   proc.syntax.Add(TSyntax.Create(skReturn));
+   ret := TSyntax.Create(skReturn);
+   FCurrentUnit.LineMap.Add(ret, FCurrent.row);
+   proc.syntax.Add(ret);
 end;
 
 procedure TrsParser.ReadImplProc;

@@ -228,6 +228,7 @@ type
    protected
       FFieldCount: integer;
       FPropCount: integer;
+      FArrayPropCount: integer;
       FMethodCount: integer;
       FDefaultProperty: TPropSymbol;
    public
@@ -292,16 +293,21 @@ type
       property Used: boolean read FUsed;
    end;
 
+   TSyntax = class;
+
    TUnitSymbol = class(TSymbol)
    private
       FPublicTable: ISymbolTable;
       FPrivateTable: ISymbolTable;
       FExternal: boolean;
+      FLineMap: TDictionary<TSyntax, integer>;
    public
       constructor Create(name: string; const publicTable, privateTable: ISymbolTable; isExternal: boolean = false);
       destructor Destroy; override;
       function SymbolLookup(const name: string): TSymbol;
       function Procs: TList<TProcSymbol>;
+
+      property LineMap: TDictionary<TSyntax, integer> read FLineMap;
       property publics: ISymbolTable read FPublicTable;
       property privates: ISymbolTable read FPrivateTable;
       property IsExternal: boolean read FExternal;
@@ -863,11 +869,13 @@ begin
    FPublicTable := publicTable;
    FPrivateTable := privateTable;
    FExternal := isExternal;
+   FLineMap := TDictionary<TSyntax, integer>.Create;
 end;
 
 destructor TUnitSymbol.Destroy;
 begin
-   inherited;
+   FLineMap.Free;
+   inherited Destroy;
 end;
 
 function TUnitSymbol.Procs: TList<TProcSymbol>;
@@ -1031,17 +1039,24 @@ begin
    CheckUnique(name, 'property');
    AddSymbol(info.Name, info.Visibility,
      TPropSymbol.Create(info.Name, info.Visibility, info.PropInfo, self), FPropCount);
+   inc(FPropCount);
 end;
 
 procedure TClassTypeSymbol.AddProp(const name: string; &type: TTypeSymbol;
   visibility: TMemberVisibility; classScope: boolean; paramList: IParamList;
   readSpec, writeSpec: TSymbol);
+var
+   counter: PInteger;
 begin
+   if assigned(paramList) and (paramList.count > 0) then
+      counter := @FArrayPropCount
+   else counter := @FPropCount;
    CheckUnique(name, 'property');
    AddSymbol(name, visibility,
      TPropSymbol.Create(name, &type, visibility, classScope, paramList,
                         readSpec, writeSpec, self),
-     FPropCount);
+     counter^);
+   inc(counter^);
 end;
 
 procedure TClassTypeSymbol.Define;
@@ -1754,7 +1769,7 @@ end;
 
 function TypeOfRttiType(value: TRttiType): TTypeSymbol;
 begin
-      result := LTypeTable[value];
+   result := LTypeTable[value];
 end;
 
 function TypeOfNativeType(value: PTypeInfo): TTypeSymbol;

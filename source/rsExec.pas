@@ -21,13 +21,18 @@ unit rsExec;
 interface
 uses
    SysUtils, TypInfo, RTTI, PrivateHeap, Generics.Collections, Windows,
-   newClass, rsDefsBackend;
+   newClass, rttiPackage, rsDefsBackend;
 
 type
    TrsExec = class;
+   TrsVM = class;
 
    TExecImportCall = reference to procedure(const name: string; address: pointer);
-   TrsExecImportProc = reference to procedure(RegisterFunction: TExecImportCall);
+   TExtFunction = reference to function(const selfValue: TValue; const index: TArray<TValue>): TValue;
+   TExtProcedure = reference to procedure(const selfValue: TValue; const index: TArray<TValue>; value: TValue);
+   TArrayPropImport = reference to procedure(const classname, name: string; const OnRead: TExtFunction; const OnWrite: TExtProcedure);
+   TrsExecImportProc = reference to procedure(RegisterFunction: TExecImportCall; RegisterArrayProp: TArrayPropImport);
+   TOnLineEvent = reference to procedure(Sender: TrsVM; const line: TrsDebugLineInfo);
 
    TrsVM = class
    private type
@@ -60,11 +65,14 @@ type
       FContext: TVmContext;
       FParamLists: TObjectStack<TSimpleParamList>;
       FText: TArray<TrsAsmInstruction>;
+      FLastLine: TrsDebugLineInfo;
+      FPackage: IRttiPackage;
 
       function InvokeCode(index: integer; const Args: TArray<TValue>): TValue;
       function RunLoop(resultIndex: integer; expected: TrsOpcode): TValue;
       procedure InitializeRegs(const op: TrsAsmInstruction;
         const Args: TArray<TValue>);
+      procedure LineCheck;
 
       function GetValue(i: integer): PValue;
       procedure SetValue(i: integer; const val: TValue); overload;
@@ -97,6 +105,10 @@ type
       procedure MovRegs(l, r: integer);
       procedure MovConst(l, r: integer);
       procedure MovInt(l, r: integer);
+      procedure MovProp(l, r: integer);
+      procedure MovArrayProp(l, r: integer);
+      procedure PropAssign(l, r: integer);
+      procedure ArrayPropAssign(l, r: integer);
       procedure NegRegister(l, r: integer);
       procedure NotRegister(l, r: integer);
       procedure IncRegister(l, r: integer);
@@ -154,11 +166,16 @@ type
       FLastImport: TPair<string, TDictionary<string, pointer>>;
       FMaxStackDepth: integer;
       FVmMap: TObjectDictionary<cardinal, TrsVm>;
+      FArrayProcTableR: TArray<TExtFunction>;
+      FArrayProcTableW: TArray<TExtProcedure>;
+      FSystemLoaded: boolean;
+      FOnLine: TOnLineEvent;
 
       class var
       FBlank: TValue;
       FBlankData: IValueData;
 
+      procedure SetExtRoutine(index: integer; method: TRttiMethod);
       function GetProc(const name: string; count: integer): TRttiMethod;
       procedure CreateMethodPointer(method: TRttiMethod; var address: pointer);
       procedure RegisterMethodPointer(method: TRttiMethod; var address: pointer);
@@ -169,6 +186,8 @@ type
       procedure LoadConstants;
       procedure LoadGlobals;
       procedure LoadEnvironment;
+      procedure LoadClass(cls: TClass);
+      procedure LoadClasses;
       function DoImport(const unitName: string): TDictionary<string, pointer>;
       function GetVM: TrsVM;
    public
@@ -185,6 +204,7 @@ type
 
       property RunOnLoad: boolean read FRunOnLoad write FRunOnLoad;
       property MaxStackDepth: integer read FMaxStackDepth write FMaxStackDepth;
+      property OnLine: TOnLineEvent read FOnLine write FOnLine;
    end;
 
    ErsRuntimeError = class(Exception);
@@ -225,7 +245,7 @@ begin
    FBlank := TValue.Empty;
    notBlank := FBlank.Cast<integer>;
    FBlankData := TValueData(notBlank).FValueData;
-   FVmMap := TObjectDictionary<cardinal, TrsVm>.Create;
+   FVmMap := TObjectDictionary<cardinal, TrsVm>.Create([doOwnsValues]);
 end;
 
 destructor TrsExec.Destroy;
@@ -253,8 +273,12 @@ begin
 end;
 
 procedure TrsExec.MethodImplementation(UserData: Pointer; const Args: TArray<TValue>; out Result: TValue);
+var
+   vm: TrsVM;
 begin
-   result := GetVM.InvokeCode(NativeInt(UserData), args);
+   vm := GetVM;
+   vm.FPackage := FProgram.package;
+   result := vm.InvokeCode(NativeInt(UserData), args);
 end;
 
 //thanks to Raymond Chen for the code to find all thread IDs
@@ -306,6 +330,7 @@ end;
 function TrsExec.DoImport(const unitName: string): TDictionary<string, pointer>;
 var
    proc: TrsExecImportProc;
+   arrayPropImporter: TArrayPropImport;
    procImporter: TExecImportCall;
    dict: TDictionary<string, pointer>;
 begin
@@ -313,6 +338,8 @@ begin
    begin
       if not FExtUnits.TryGetValue(unitName, proc) then
          raise ErsRuntimeError.CreateFmt('Import proc for unit %s not found', [UnitName]);
+      if unitName = 'SYSTEM' then
+         FSystemLoaded := true;
       result := TDictionary<string, pointer>.Create;
       dict := result;
       procImporter :=
@@ -320,12 +347,45 @@ begin
          begin
             dict.Add(UpperCase(name), address);
          end;
-      proc(procImporter);
+      arrayPropImporter :=
+         procedure(const classname, name: string; const OnRead: TExtFunction; const OnWrite: TExtProcedure)
+         var
+            idx: integer;
+         begin
+            if assigned(OnRead) then
+            begin
+               idx := FProgram.ArrayProps.IndexOf(format('%s.GET*%s', [classname, name]));
+               if idx = -1 then
+                  asm int 3 end;
+               if idx > high(FArrayProcTableR) then
+                  SetLength(FArrayProcTableR, idx + 1);
+               FArrayProcTableR[idx] := OnRead;
+            end;
+            if assigned(OnWrite) then
+            begin
+               idx := FProgram.ArrayProps.IndexOf(format('%s.SET*%s', [classname, name]));
+               if idx = -1 then
+                  asm int 3 end;
+               if idx > high(FArrayProcTableW) then
+                  SetLength(FArrayProcTableW, idx + 1);
+               FArrayProcTableW[idx] := OnWrite;
+            end;
+         end;
+      proc(procImporter, arrayPropImporter);
       FLastImport.Value.Free;
       FLastImport.Key := unitName;
       FLastImport.Value := dict;
    end;
    result := FLastImport.Value;
+end;
+
+procedure TrsExec.SetExtRoutine(index: integer; method: TRttiMethod);
+begin
+   if index > high(FExtRoutines) then
+      SetLength(FExtRoutines, index + 1);
+   if assigned(FExtRoutines[index]) and(FExtRoutines[index] <> method) then
+      asm int 3 end;
+   FExtRoutines[index] := method;
 end;
 
 procedure TrsExec.RegisterMethodPointer(method: TRttiMethod; var address: pointer);
@@ -341,9 +401,7 @@ begin
    if not importMap.TryGetValue(UpperCase(method.Name), address) then
       raise ErsRuntimeError.CreateFmt('No import provided for procedure %s', [method.Name]);
 
-   if index > high(FExtRoutines) then
-      SetLength(FExtRoutines, index + 1);
-   FExtRoutines[index] := (method);
+   SetExtRoutine(index, method);
 end;
 
 procedure TrsExec.RegisterProcs(const unitName: string; method: TRttiMethod; var address: pointer);
@@ -355,14 +413,21 @@ end;
 
 procedure TrsExec.LoadProcs;
 begin
-   FPRogram.InstallPackage(self.RegisterProcs);
+   FSystemLoaded := false;
+   SetLength(FExtRoutines, 0);
+   FProcMap.Clear;
+   FProgram.InstallPackage(self.RegisterProcs);
+   if (not FSystemLoaded) and (FExtUnits.ContainsKey('SYSTEM')) then
+      DoImport('SYSTEM');
 end;
 
 procedure TrsExec.LoadConstants;
 
    function DeserializeConstant(const value: string; info: PTypeInfo): TValue;
    begin
-     case info.Kind of
+      if info = nil then
+         result := (TValue.Empty)
+     else case info.Kind of
        tkEnumeration: result := TValue.FromOrdinal(info, TypInfo.GetEnumValue(info, value));
        tkInteger: result := StrToInt(value);
        tkInt64: result := StrToInt64(value);
@@ -402,37 +467,55 @@ begin
    end;
 end;
 
-procedure TrsExec.LoadEnvironment;
+procedure TrsExec.LoadClass(cls: TClass);
 var
    info: TrsProcInfo;
    methods: TArray<TRttiMethod>;
    method: TRttiMethod;
    classdot: string;
-   i: integer;
+
+   function NoImport(obj: TRttiObject): boolean;
+   var
+      attr: TCustomAttribute;
+   begin
+      for attr in obj.GetAttributes do
+         if attr is NoImportAttribute then
+            exit(true);
+      result := false;
+   end;
+
+begin
+   classdot := cls.ClassName + '.';
+   methods := TRttiContext.Create.GetType(cls.ClassInfo).GetDeclaredMethods;
+   for method in methods do
+   begin
+      if (not NoImport(method)) and (FProgram.Routines.TryGetValue(classdot + UpperCase(method.Name), info)) then
+         SetExtRoutine(-info.index, method);
+   end;
+end;
+
+procedure TrsExec.LoadEnvironment;
 begin
    if assigned(FEnvironment) then
-   begin
-      classdot := FEnvironment.ClassName + '.';
-      methods := TRttiContext.Create.GetType(FEnvironment.ClassInfo).GetMethods;
-      SetLength(FExtRoutines, length(methods));
-      i := 0;
-      for method in methods do
-         if FProgram.Routines.TryGetValue(classdot + UpperCase(method.Name), info) then
-         begin
-            i := min(i, info.index);
-            FExtRoutines[-info.index] := method;
-         end;
-      SetLength(FExtRoutines, succ(-i));
-   end;
+      LoadClass(FEnvironment.ClassType);
+end;
+
+procedure TrsExec.LoadClasses;
+var
+   cls: TClass;
+begin
+   for cls in FProgram.ExtClasses do
+      LoadClass(cls);
 end;
 
 procedure TrsExec.Load(prog: TrsProgram);
 begin
-   assert(FProgram = nil); //fix this after changing to interfaces
+//   assert(FProgram = nil); //fix this after changing to interfaces
    FProgram := prog;
    FText := FProgram.Text;
    LoadEnvironment;
    LoadProcs;
+   LoadClasses;
    LoadConstants;
    LoadGlobals;
    if FRunOnLoad then
@@ -709,6 +792,25 @@ begin
    SetValue(l, r);
 end;
 
+procedure TrsVM.MovProp(l, r: integer);
+var
+   sr: TObject;
+   prop: TRttiProperty;
+begin
+   prop := FParent.FProgram.Properties.Objects[r] as TRttiProperty;
+   sr := GetSR.AsObject;
+   SetValue(l, prop.GetValue(sr));
+end;
+
+procedure TrsVM.MovArrayProp(l, r: integer);
+var
+   args: TArray<TValue>;
+begin
+   args := FParamLists.Peek.ToArray;
+   FParamLists.Pop;
+   SetValue(l, FParent.FArrayProcTableR[r](GetSR, args));
+end;
+
 procedure TrsVM.NegRegister(l, r: integer);
 var
    val2: PValue;
@@ -797,6 +899,7 @@ begin
       tkInteger: FContext.br := val.AsInteger = val2.AsInteger;
       tkFloat: FContext.br := val.AsExtended = val2.AsExtended;
       tkString, tkChar: FContext.br := val.AsString = val2.AsString;
+       tkEnumeration: FContext.br := val.AsOrdinal = val2.AsOrdinal;
       else CorruptError;
    end;
 end;
@@ -919,12 +1022,7 @@ begin
    FParamLists.Pop;
    method := FParent.FExtRoutines[r];
    if method.IsStatic then
-   begin
-      if assigned(method.ReturnType) then
-         handle := method.ReturnType.Handle
-      else handle := nil;
-      retval := RTTI.Invoke(method.CodeAddress, args, method.CallingConvention, Handle)
-   end
+      retval := method.Invoke(nil, args)
    else retval := method.Invoke(GetSR, args);
    if assigned(method.ReturnType) then
       SetValue(l, retval);
@@ -993,6 +1091,19 @@ begin
    ArrayElemAssignC(val.AsInteger, r);
 end;
 
+procedure TrsVM.LineCheck;
+var
+   newLine: TrsDebugLineInfo;
+begin
+   newLine := FParent.FProgram.OpcodeMap[GetIP];
+   if FLastLine <> newLine then
+   begin
+      if assigned(FParent.FOnLine) then
+         FParent.FOnLine(self, newLine);
+      FLastLine :=  newLine;
+   end;
+end;
+
 procedure TrsVM.LoadSelfRegister(l: integer);
 var
    val: PValue;
@@ -1013,6 +1124,27 @@ begin
    else SetValue(l, trunc(val2.AsExtended));
 end;
 
+procedure TrsVM.PropAssign(l, r: integer);
+var
+   val2: PValue;
+   sr: TObject;
+   prop: TRttiProperty;
+begin
+   val2 := GetValue(r);
+   sr := GetSR.AsObject;
+   prop := FParent.FProgram.Properties.Objects[l] as TRttiProperty;
+   prop.SetValue(sr, val2^);
+end;
+
+procedure TrsVM.ArrayPropAssign(l, r: integer);
+var
+   args: TArray<TValue>;
+begin
+   args := FParamLists.Peek.ToArray;
+   FParamLists.Pop;
+   FParent.FArrayProcTableW[l](GetSR, args, FContext.locals[r]);
+end;
+
 function TrsVM.RunLoop(resultIndex: integer; expected: TrsOpcode): TValue;
 var
    op: PrsAsmInstruction;
@@ -1020,6 +1152,7 @@ begin
    repeat
       inc(FContext.ip);
       op := FContext.ip;
+      LineCheck;
       case op.op of
          OP_NOP:  ;
          OP_ADD:  AddRegs(op.left, op.right);
@@ -1048,7 +1181,8 @@ begin
          OP_MOVC: MovConst(op.left, op.right);
          OP_MOVI: MovInt(op.left, op.right);
          OP_MOVF: NotImplemented;
-         OP_MOVP: NotImplemented;
+         OP_MOVP: MovProp(op.left, op.right);
+         op_MVAP: MovArrayProp(op.left, op.right);
          OP_NEG:  NegRegister(op.left, op.right);
          OP_NOT:  NotRegister(op.left, op.right);
          OP_INC:  IncRegister(op.left, op.right);
@@ -1091,7 +1225,8 @@ begin
          OP_EASN: ArrayElemAssign(op.left, op.right);
          OP_EASC: ArrayElemAssignC(op.left, op.right);
          OP_FASN: NotImplemented;
-         OP_PASN: NotImplemented;
+         OP_PASN: PropAssign(op.left, op.right);
+         OP_APSN: ArrayPropAssign(op.left, op.right);
          OP_TRYF: NotImplemented;
          OP_TRYE: NotImplemented;
          OP_TRYC: NotImplemented;

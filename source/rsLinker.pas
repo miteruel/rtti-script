@@ -33,7 +33,11 @@ type
         prog: TrsProgram);
       procedure ResolveCallRef(ref: TUnresolvedReference; startpos: integer;
         prog: TrsProgram);
+      procedure ResolveArrayPropRef(ref: TUnresolvedReference; startpos: integer;
+        prog: TrsProgram);
       procedure IntegrateUnit(rsu: TrsScriptUnit; prog: TrsProgram);
+      procedure ResolvePropRef(ref: TUnresolvedReference; startpos: integer;
+        prog: TrsProgram);
    public
       constructor Create;
       destructor Destroy; override;
@@ -74,6 +78,8 @@ begin
    opcode := prog.Text[startpos + ref.location];
    assert(opcode.op in [OP_CALL, OP_PCAL]);
    assert(opcode.right = -1);
+   if not prog.Routines.ContainsKey(ref.name) then
+      asm int 3 end;
    index := prog.routines[ref.name].index;
    if index < 0 then
    begin
@@ -83,6 +89,52 @@ begin
       opcode.right := -index;
    end
    else opcode.right := (startpos + ref.location) - index;
+   prog.Text[startpos + ref.location] := opcode;
+end;
+
+procedure TrsLinker.ResolveArrayPropRef(ref: TUnresolvedReference; startpos: integer;
+  prog: TrsProgram);
+var
+   opcode: TrsAsmInstruction;
+   index: integer;
+begin
+   opcode := prog.Text[startpos + ref.location];
+   assert(opcode.op in [OP_MVAP, OP_APSN]);
+   index := prog.ArrayProps.IndexOf(ref.name);
+   if index < 0 then
+      raise ELinkError.CreateFmt('Missing array property reference: %s', [ref.name]);
+   if opcode.op = OP_MVAP then
+   begin
+      assert(opcode.right = -1);
+      opcode.right := index;
+   end
+   else begin
+      assert(opcode.left = -1);
+      opcode.left := index;
+   end;
+   prog.Text[startpos + ref.location] := opcode;
+end;
+
+procedure TrsLinker.ResolvePropRef(ref: TUnresolvedReference; startpos: integer;
+  prog: TrsProgram);
+var
+   opcode: TrsAsmInstruction;
+   index: integer;
+begin
+   opcode := prog.Text[startpos + ref.location];
+   assert(opcode.op in [OP_PASN, OP_MOVP]);
+   index := prog.Properties.IndexOf(ref.name);
+   if index < 0 then
+      raise ELinkError.CreateFmt('Missing property reference: %s', [ref.name]);
+   if opcode.op = OP_PASN then
+   begin
+      assert(opcode.left = -1);
+      opcode.left := index;
+   end
+   else begin
+      assert(opcode.right = -1);
+      opcode.right := index;
+   end;
    prog.Text[startpos + ref.location] := opcode;
 end;
 
@@ -97,6 +149,9 @@ begin
          rtVar: ResolveVarRef(ref, startpos, prog);
          rtCall: ResolveCallRef(ref, startpos, prog);
          rtType: assert(false); //ResolveTypeRef(ref, startpos, prog);
+         rtProp: ResolvePropRef(ref, startpos, prog);
+         rtArrayProp: ResolveArrayPropRef(ref, startpos, prog);
+         else assert(false);
       end;
    prog.units.add(rsu.&Unit);
 end;
@@ -117,7 +172,7 @@ end;
 procedure TrsLinker.IntegrateUnit(rsu: TrsScriptUnit; prog: TrsProgram);
 var
    pair: TPair<string, TrsProcInfo>;
-   start: integer;
+   start, line: integer;
    info: TrsProcInfo;
    scriptClass: TNewClass;
 begin
@@ -141,7 +196,11 @@ begin
    prog.Globals.AddStrings(rsu.Globals);
    for scriptClass in rsu.&Unit do
       prog.ScriptClasses.Add(scriptClass);
-
+   prog.ArrayProps.AddStrings(rsu.ArrayProps);
+   prog.Properties.AddStrings(rsu.Properties);
+   prog.ExtClasses.AddRange(rsu.ExtClasses);
+   for line in rsu.OpcodeMap do
+      prog.OpcodeMap.Add(TrsDebugLineInfo.Create(rsu.name, line));
 end;
 
 function TrsLinker.Link(const units: TUnitList; constants: TStringList; environment: TClass): TrsProgram;

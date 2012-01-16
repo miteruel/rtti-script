@@ -222,6 +222,7 @@ begin
       name := FUseStack.Peek
    else name := '';
    EnsureSysUnit;
+   TRttiContext.Create.GetPackages; //workaround for sorting error
    if assigned(FEnvironment) then
       FParser.SetEnvironment(rsDefs.TypeOfNativeType(FEnvironment.ClassInfo) as TClassTypeSymbol);
    units := TUnitList.Create;
@@ -340,7 +341,11 @@ var
 begin
    lName := UpperCase(name);
    if FUnitCache.TryGetValue(lName, &unit) then
-      result := true
+   begin
+      result := true;
+      if not FUnitList.Contains(&unit) then
+         FUnitList.Add(&unit);
+   end
    else if FExtUnits.TryGetValue(lName, proc) then
    begin
       &unit := InternalImport(name, proc);
