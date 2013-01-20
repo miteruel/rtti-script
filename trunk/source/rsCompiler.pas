@@ -175,6 +175,9 @@ begin
    try
       try
          for symbol in FUnitList do
+            if symbol.IsExternal then
+               units.Add(codegen.process(symbol));
+         for symbol in FUnitList do
          begin
             if not symbol.IsExternal then
                for optimizer in FOptimizers do
@@ -186,8 +189,8 @@ begin
                   finally
                      procs.Free;
                   end;
+                  units.Add(codegen.process(symbol));
                end;
-            units.Add(codegen.process(symbol));
          end;
          linker := TrsLinker.Create;
          result := linker.Link(units, codegen.constants, FEnvironment);
@@ -204,11 +207,13 @@ end;
 procedure TrsCompiler.InternalCompile(const script, name: string);
 var
    symbol: TUnitSymbol;
+   uName: string;
 begin
    symbol := FParser.Parse(script, name);
-   if FUnitCache.ContainsKey(symbol.name) then
-      FUnitList.Remove(FUnitCache[symbol.name]);
-   FUnitCache.AddOrSetValue(symbol.name, symbol);
+   uName := UpperCase(symbol.name);
+   if FUnitCache.ContainsKey(uName) then
+      FUnitList.Remove(FUnitCache[uname]);
+   FUnitCache.AddOrSetValue(uName, symbol);
    FUnitList.Add(symbol);
 end;
 

@@ -104,6 +104,8 @@ type
       procedure AssignSelfBinOp(lvalue: TVariableSyntax; rvalue: TBinOpSyntax);
       procedure PushParam(param: TTypedSyntax);
       function WriteArrayPropRead(value: TArrayPropSyntax): TrsAsmInstruction;
+    function WritePropertyValue(symbol: TPropSymbol;
+      sem: integer): TrsAsmInstruction;
    public
       constructor Create;
       destructor Destroy; override;
@@ -307,6 +309,30 @@ begin
    end;
 end;
 
+function MakeArrayPropGetter(const value: string): string;
+begin
+   result := StringReplace(value, '.', '.Get*', []);
+end;
+
+function TrsCodegen.WritePropertyValue(symbol: TPropSymbol; sem: integer): TrsAsmInstruction;
+var
+   typ: TTypeSymbol;
+   isArray: boolean;
+   refType: TReferenceType;
+begin
+   typ := symbol.&Type;
+   isArray := AnsiStartsStr('ARRAYOF*', typ.name);
+   if isArray then
+      result.op := OP_MVAP
+   else result.op := OP_MOVP;
+   result.left := NextReg(sem);
+   result.right := -1;
+
+   if isArray then
+      FCurrent.Unresolved.Add(TUnresolvedReference.Create(MakeArrayPropGetter(symbol.fullName), FCurrent.Text.Count, rtArrayProp))
+   else FCurrent.Unresolved.Add(TUnresolvedReference.Create(symbol.fullName, FCurrent.Text.Count, rtProp));
+end;
+
 function TrsCodegen.WriteVariable(value: TVariableSyntax): TrsAsmInstruction;
 begin
    if value.symbol is TFieldSymbol then
@@ -316,12 +342,7 @@ begin
       result.right := TFieldSymbol(value.symbol).index;
    end
    else if value.symbol is TPropSymbol then
-   begin
-      result.op := OP_MOVP;
-      result.left := NextReg(value.sem);
-      result.right := -1;
-      FCurrent.Unresolved.Add(TUnresolvedReference.Create(TPropSymbol(value.symbol).fullName, FCurrent.Text.Count, rtProp));
-   end
+      result := WritePropertyValue(TPropSymbol(value.symbol), value.sem)
    else if value.&type = BooleanType then
    begin
       result.op := OP_MOV;
@@ -493,7 +514,9 @@ begin
    result.op := OP_MVAP;
    result.left := NextReg(value.sem);
    result.right := -1;
-   FCurrent.Unresolved.Add(TUnresolvedReference.Create(((Base.Right as TVariableSyntax).Symbol as TPropSymbol).readSpec.fullName, FCurrent.Text.Count, rtArrayProp));
+   FCurrent.Unresolved.Add(TUnresolvedReference.Create(
+     ((Base.Right as TVariableSyntax).Symbol as TPropSymbol).readSpec.fullName,
+     FCurrent.Text.Count, rtArrayProp));
 end;
 
 function TrsCodegen.Eval(value: TTypedSyntax): integer;
