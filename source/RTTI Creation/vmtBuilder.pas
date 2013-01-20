@@ -55,14 +55,15 @@ uses
   SysUtils, Classes, Math;
 
 const
-  MAX_BUFFER_SIZE = 2048 * 5;
+  BASE_BUFFER_SIZE = 2048 * 5;
 
 type
   TBuffer = class(TInterfacedObject, IBuffer)
   private
-    FBuffer: array[0..MAX_BUFFER_SIZE - 1] of byte;
+    FBuffer: array of byte;
     FIndex: integer;
   public
+    constructor Create;
     procedure add(const data; const size: integer);
     function GetBuffer(out size: integer; ph: TPrivateHeap = nil): pointer;
     function size: integer;
@@ -170,7 +171,7 @@ begin
   tail.CC := cc;
   tail.ResultType := RetrieveTypeInfo(retval);
   //quick approximation, since apparently nothing uses tail.ParOff anyway
-  tail.ParOff := (min(system.length(params) - NonStackParams, 0) + 2) * sizeof(pointer);
+  tail.ParOff := (max(system.length(params) - NonStackParams, 0) + 2) * sizeof(pointer);
   tail.ParamCount := system.length(params);
   buffer.add(tail, sizeof(TVmtMethodEntryTail) - sizeof(TVmtMethodParam));
 
@@ -188,8 +189,8 @@ end;
 
 procedure TBuffer.add(const data; const size: integer);
 begin
-  if FIndex + size >= MAX_BUFFER_SIZE then
-    raise ERangeError.Create('Buffer overflow');
+  while FIndex + size >= length(FBuffer) do
+    SetLength(FBuffer, length(FBuffer) * 2);
   system.Move(data, FBuffer[FIndex], size);
   inc(FIndex, size);
 end;
@@ -198,6 +199,11 @@ procedure TBuffer.CopyTo(const Dest: IBuffer);
 begin
    if FIndex > 0 then
       dest.add(FBuffer[0], FIndex);
+end;
+
+constructor TBuffer.Create;
+begin
+   SetLength(FBuffer, BASE_BUFFER_SIZE);
 end;
 
 function TBuffer.current: pointer;

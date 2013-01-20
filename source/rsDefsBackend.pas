@@ -276,8 +276,11 @@ var
    index: integer;
 begin
    index := length(FText);
-   SetLength(FText, index + value.Count);
-   Move(value.ToArray[0], FText[index], value.Count * sizeof(TrsAsmInstruction));
+   if (index > 0) or (value.Count > 0) then
+   begin
+	  SetLength(FText, index + value.Count);
+      Move(value.ToArray[0], FText[index], value.Count * sizeof(TrsAsmInstruction));
+   end;
 end;
 
 constructor TrsProgram.Create;

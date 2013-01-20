@@ -214,7 +214,7 @@ type
 
 implementation
 uses
-   Windows, Math;
+   Windows, Math, StrUtils;
 
 type
 //minor hack
@@ -246,7 +246,6 @@ begin
    FScopeStack.Free;
    FQueue.Free;
    FLexer.Free;
-   FEnvironmentSymbol.Free;
 end;
 
 procedure TrsParser.AddScope(&unit: TUnitSymbol);
@@ -344,6 +343,7 @@ procedure TrsParser.SetEnvironment(env: TClassTypeSymbol);
 begin
    FEnvironment := env.GetSymbolTable;
    FEnvironmentSymbol := TVarSymbol.Create('ENVIRONMENT*self', env, nil);
+   FPrivateSymbols.Add(FEnvironmentSymbol.name, FEnvironmentSymbol);
 end;
 
 procedure TrsParser.SetQueue(value: TTokenQueue);
@@ -466,7 +466,8 @@ begin
       raise EParseError.CreateFmt('Identifier redeclared: "%s"', [name]);
    if not FOnUses(name, symbol) then
       raise EParseError.CreateFmt('Used unit "%s" not found', [name]);
-   assert(symbol.name = name);
+
+   assert(AnsiSameText(symbol.name, name));
    AddScope(symbol);
 end;
 

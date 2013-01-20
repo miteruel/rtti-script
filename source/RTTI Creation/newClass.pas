@@ -402,6 +402,7 @@ begin
   else result := 0;
 end;
 
+{$R-}
 procedure TNewClass.FixMethodRtti(overlay: PVmt; offset: integer);
 var
    table: PVmtMethodTableEx;
@@ -417,6 +418,7 @@ begin
       nativeInt(table.Entry[i].Entry) := nativeInt(@table.Entry[i].Entry) - entryOffset;
    end;
 end;
+{$R+}
 
 function TNewClass.GetMaxVMIndex: integer;
 var
