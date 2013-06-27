@@ -95,6 +95,8 @@ type
       procedure ShlRegs(l, r: integer);
       procedure ShrRegs(l, r: integer);
       procedure DivInt(l, r: integer);
+      procedure AddInt(l, r: integer);
+      procedure SubInt(l, r: integer);
       procedure MulInt(l, r: integer);
       procedure ModInt(l, r: integer);
       procedure AndInt(l, r: integer);
@@ -121,13 +123,13 @@ type
       procedure CompNeq(l, r: integer);
       function RegAsBoolean(index: integer): boolean;
       procedure XorbRegs(l, r: integer);
-      procedure NewList(l: integer);
-      procedure PushValue(l: integer);
+      procedure NewList(l, r: integer);
+      procedure PushValue(l, r: integer);
       procedure Call(l, r: integer);
       procedure Callx(l, r: integer);
       procedure PCall(l, r: integer);
       procedure PCallx(l, r: integer);
-      procedure ArrayLoad(l: integer);
+      procedure ArrayLoad(l, r: integer);
       procedure ArrayElemMove(l, r: integer);
       procedure CompEqi(l, r: integer);
       procedure CompGtei(l, r: integer);
@@ -135,11 +137,11 @@ type
       procedure CompLtei(l, r: integer);
       procedure CompLti(l, r: integer);
       procedure CompNeqi(l, r: integer);
-      procedure PushConst(l: integer);
-      procedure PushInt(l: integer);
+      procedure PushConst(l, r: integer);
+      procedure PushInt(l, r: integer);
       procedure ArrayElemAssignC(l, r: integer);
       procedure ArrayElemAssign(l, r: integer);
-      procedure LoadSelfRegister(l: integer);
+      procedure LoadSelfRegister(l, r: integer);
       procedure StringConcat(l, r: integer);
       procedure TruncReg(l, r: integer);
       procedure AssignIntToFloat(l, r: integer);
@@ -159,6 +161,7 @@ type
       FProcMap: TMultimap<string, TRttiMethod>;
       FExtUnits: TDictionary<string, TrsExecImportProc>;
       FExtRoutines: TArray<TRttiMethod>;
+      FMagicRoutines: TArray<TExtFunction>;
       FImpls: TObjectList<TMethodImplementation>;
       FText: TArray<TrsAsmInstruction>;
       FEnvironment: TObject;
@@ -421,25 +424,48 @@ begin
       DoImport('SYSTEM');
 end;
 
-procedure TrsExec.LoadConstants;
+function DeserializeConstant(const value: string; info: PTypeInfo): TValue; forward;
 
-   function DeserializeConstant(const value: string; info: PTypeInfo): TValue;
-   begin
-      if info = nil then
-         result := (TValue.Empty)
-     else case info.Kind of
-       tkEnumeration: result := TValue.FromOrdinal(info, TypInfo.GetEnumValue(info, value));
-       tkInteger: result := StrToInt(value);
-       tkInt64: result := StrToInt64(value);
-       tkUString, tkString, tkWString, tkChar, tkWChar: result := value;
-       tkFloat: result := StrToFloat(value);
+function LoadArray(const value: string; info: PTypeInfo): TValue;
+var
+   arr: TArray<TValue>;
+   parser: TStringList;
+   elType: PTypeInfo;
+   i: integer;
+begin
+   assert((value[1] = '[') and (value[length(value)] = ']'));
+   elType := GetTypeData(info).eltype2^;
+   parser := TStringList.Create;
+   try
+      parser.CommaText := copy(value, 2, length(value) - 2);
+      setLength(arr, parser.Count);
+      for i := 0 to parser.Count - 1 do
+         arr[i] := DeserializeConstant(parser[i], elType);
+   finally
+      parser.Free;
+   end;
+   result := TValue.FromArray(info, arr);
+end;
+
+function DeserializeConstant(const value: string; info: PTypeInfo): TValue;
+begin
+   if info = nil then
+      result := (TValue.Empty)
+  else case info.Kind of
+    tkEnumeration: result := TValue.FromOrdinal(info, TypInfo.GetEnumValue(info, value));
+    tkInteger: result := StrToInt(value);
+    tkInt64: result := StrToInt64(value);
+    tkUString, tkString, tkWString, tkChar, tkWChar: result := value;
+    tkFloat: result := StrToFloat(value);
 {Not ready for this yet; requires support in codegen first}
 //       tkFloat: result := StrToFloat(value, PascalFormatSettings);
-       tkSet: TValue.Make(StringToSet(info, value), info, result);
-       else raise Exception.Create('Unknown constant type');
-     end;
-   end;
+    tkSet: TValue.Make(StringToSet(info, value), info, result);
+    tkArray, tkDynArray: result := LoadArray(value, info);
+    else raise Exception.Create('Unknown constant type');
+  end;
+end;
 
+procedure TrsExec.LoadConstants;
 var
    i: integer;
 begin
@@ -713,6 +739,22 @@ begin
    SetValue(l, val.AsString + GetValue(r).AsString);
 end;
 
+procedure TrsVM.AddInt(l, r: integer);
+var
+   val: PValue;
+begin
+   val := GetValue(l);
+   SetValue(l, val.AsInteger + r);
+end;
+
+procedure TrsVM.SubInt(l, r: integer);
+var
+   val: PValue;
+begin
+   val := GetValue(l);
+   SetValue(l, val.AsInteger - r);
+end;
+
 procedure TrsVM.MulInt(l, r: integer);
 var
    val: PValue;
@@ -976,22 +1018,22 @@ begin
    FContext.br := RegAsBoolean(l) xor RegAsBoolean(r);
 end;
 
-procedure TrsVM.NewList(l: integer);
+procedure TrsVM.NewList(l, r: integer);
 begin
    FParamLists.Push(TSimpleParamList.Create(l));
 end;
 
-procedure TrsVM.PushValue(l: integer);
+procedure TrsVM.PushValue(l, r: integer);
 begin
    FParamLists.peek.Add(GetValue(l)^);
 end;
 
-procedure TrsVM.PushInt(l: integer);
+procedure TrsVM.PushInt(l, r: integer);
 begin
    FParamLists.peek.Add(l);
 end;
 
-procedure TrsVM.PushConst(l: integer);
+procedure TrsVM.PushConst(l, r: integer);
 begin
    FParamLists.Peek.Add(FParent.FConstants[l]);
 end;
@@ -1015,15 +1057,19 @@ procedure TrsVM.Callx(l, r: integer);
 var
    args: TArray<TValue>;
    method: TRttiMethod;
-   handle: PTypeInfo;
    retval: TValue;
 begin
    args := FParamLists.Peek.ToArray;
    FParamLists.Pop;
    method := FParent.FExtRoutines[r];
-   if method.IsStatic then
-      retval := method.Invoke(nil, args)
-   else retval := method.Invoke(GetSR, args);
+   try
+      if method.IsStatic then
+         retval := method.Invoke(nil, args)
+      else retval := method.Invoke(GetSR, args);
+   except
+      on EInsufficientRTTI do
+         raise ErsRuntimeError.CreateFmt('Tried to call external routine "%s" with no implementation.', [method.Name]);
+   end;
    if assigned(method.ReturnType) then
       SetValue(l, retval);
 end;
@@ -1052,7 +1098,7 @@ begin
    else FParamLists.peek.Add(method.Invoke(GetSR, args));
 end;
 
-procedure TrsVM.ArrayLoad(l: integer);
+procedure TrsVM.ArrayLoad(l, r: integer);
 var
    val: PValue;
 begin
@@ -1104,7 +1150,7 @@ begin
    end;
 end;
 
-procedure TrsVM.LoadSelfRegister(l: integer);
+procedure TrsVM.LoadSelfRegister(l, r: integer);
 var
    val: PValue;
 begin
@@ -1144,6 +1190,123 @@ begin
    FParamLists.Pop;
    FParent.FArrayProcTableW[l](GetSR, args, FContext.locals[r]);
 end;
+
+type TOpcodeProc = procedure (Self: TObject; l, r: integer);
+
+const
+  OP_PROCS: array[TrsOpcode] of pointer =
+   (nil,                 //OP_NOP
+    @TrsVM.AddRegs,      //OP_ADD
+    @TrsVM.SubRegs,      //OP_SUB
+    @TrsVM.MulRegs,      //OP_MUL
+    @TrsVM.DivRegs,      //OP_DIV
+    @TrsVM.FdivRegs,     //OP_FDIV
+    @TrsVM.ModRegs,      //OP_MOD
+    @TrsVM.AndRegs,      //OP_AND
+    @TrsVM.OrRegs,       //OP_OR
+    @TrsVM.XorRegs,      //OP_XOR
+    @TrsVM.ShlRegs,      //OP_SHL
+    @TrsVM.ShrRegs,      //OP_SHR
+    nil,                 //OP_AS
+    @TrsVM.StringConcat, //OP_SCAT
+    @TrsVM.AddInt,       //OP_ADDI
+    @TrsVM.SubInt,       //OP_SUBI
+    @TrsVM.MulInt,       //OP_MULI
+    @TrsVM.DivInt,       //OP_DIVI
+    @TrsVM.ModInt,       //OP_MODI
+    @TrsVM.AndInt,       //OP_ANDI
+    @TrsVM.OrInt,        //OP_ORI
+    @TrsVM.XorInt,       //OP_XORI
+    @TrsVM.ShlInt,       //OP_SHLI
+    @TrsVM.ShrInt,       //OP_SHRI
+    @TrsVM.MovRegs,      //OP_MOV
+    @TrsVM.MovConst,     //OP_MOVC
+    @TrsVM.MovInt,       //OP_MOVI
+    nil,                 //OP_MOVF
+    @TrsVM.MovProp,      //OP_MOVP
+    @TrsVM.MovArrayProp, //OP_MVAP
+    @TrsVM.NegRegister,  //OP_NEG
+    @TrsVM.NotRegister,  //OP_NOT
+    @TrsVM.IncRegister,  //OP_INC
+    @TrsVM.DecRegister,  //OP_DEC
+    @TrsVM.CompGte,      //OP_GTE
+    @TrsVM.CompLte,      //OP_LTE
+    @TrsVM.CompGt,       //OP_GT
+    @TrsVM.CompLt,       //OP_GT
+    @TrsVM.CompEq,       //OP_EQ
+    @TrsVM.CompNeq,      //OP_NEQ
+    @TrsVM.CompGtei,     //OP_GTEI
+    @TrsVM.CompLtei,     //OP_LTEI
+    @TrsVM.CompGti,      //OP_GTI
+    @TrsVM.CompLti,      //OP_GTI
+    @TrsVM.CompEqi,      //OP_EQI
+    @TrsVM.CompNeqi,     //OP_NEQI
+    nil,                 //OP_IN
+    nil,                 //OP_IS
+    @TrsVM.XorbRegs,     //OP_XORB
+    @TrsVM.NewList,      //OP_LIST
+    @TrsVM.PushValue,    //OP_PUSH
+    @TrsVM.PushInt,      //OP_PSHI
+    @TrsVM.PushConst,    //OP_PSHC
+    @TrsVM.Call,         //OP_CALL
+    @TrsVM.CallX,        //OP_CALX
+    nil,                 //OP_CALM
+    @TrsVM.PCall,        //OP_PCAL
+    @TrsVM.PCallX,       //OP_PCLX
+    nil,                 //OP_PCLM
+    nil,                 //OP_INIT
+    nil,                 //OP_RET
+    nil,                 //OP_JUMP
+    nil,                 //OP_FJMP
+    nil,                  //OP_TJMP
+    @TrsVM.ArrayLoad,    //OP_ARYL
+    @TrsVM.ArrayElemMove,//OP_ARYL
+    @TrsVM.MovRegs,      //OP_VASN
+    @TrsVM.AssignIntToFloat,//OP_AITF
+    @TrsVM.ArrayElemAssign, //OP_EASN
+    @TrsVM.ArrayElemAssignC,//OP_EASC
+    nil,                    //OP_FASN
+    @TrsVM.PropAssign,      //OP_PASN
+    @TrsVM.ArrayPropAssign, //OP_APSN
+    nil,                    //OP_TRYF
+    nil,                    //OP_TRYE
+    nil,                    //OP_TRYC
+    nil,                    //OP_CTRY
+    nil,                    //OP_EXIS
+    nil,                    //OP_EXLD
+    nil,                    //OP_RAIS
+    @TrsVM.LoadSelfRegister,//OP_SRLD
+    nil,                    //OP_MCLS
+    @TrsVM.TruncReg         //OP_TRNC
+    );
+{
+         OP_NOP:  ;
+         OP_AS:   NotImplemented;
+         OP_MOVF: NotImplemented;
+         OP_IN:   NotImplemented;
+         OP_IS:   NotImplemented;
+         OP_CALM:  NotImplemented;
+         OP_PCLM:  NotImplemented;
+         OP_INIT: CorruptError;
+         OP_RET:  Break;
+                   //-1 because IP will increment after the loop
+         OP_JUMP: inc(FContext.ip, op.left - 1);
+         OP_FJMP: if not FContext.br then
+                     inc(FContext.ip, op.left - 1);
+         OP_TJMP: if FContext.br then
+                     inc(FContext.ip, op.left - 1);
+         OP_FASN: NotImplemented;
+         OP_TRYF: NotImplemented;
+         OP_TRYE: NotImplemented;
+         OP_TRYC: NotImplemented;
+         OP_CTRY: Break;
+         OP_EXIS: NotImplemented;
+         OP_EXLD: NotImplemented;
+         OP_RAIS: NotImplemented;
+         OP_MCLS: NotImplemented;
+}
+var
+   OPCODES: array[TrsOpcode] of TOpcodeProc absolute OP_PROCS;
 
 function TrsVM.RunLoop(resultIndex: integer; expected: TrsOpcode): TValue;
 var
@@ -1202,10 +1365,10 @@ begin
          OP_IN:   NotImplemented;
          OP_IS:   NotImplemented;
          OP_XORB: XorbRegs(op.left, op.right);
-         OP_LIST: NewList(op.left);
-         OP_PUSH: PushValue(op.left);
-         OP_PSHI: PushInt(op.left);
-         OP_PSHC: PushConst(op.left);
+         OP_LIST: NewList(op.left, 0);
+         OP_PUSH: PushValue(op.left, 0);
+         OP_PSHI: PushInt(op.left, 0);
+         OP_PSHC: PushConst(op.left, 0);
          OP_CALL: Call(op.left, op.right);
          OP_CALX: CallX(op.left, op.right);
          OP_PCAL: PCall(op.left, op.right);
@@ -1218,7 +1381,7 @@ begin
                      inc(FContext.ip, op.left - 1);
          OP_TJMP: if FContext.br then
                      inc(FContext.ip, op.left - 1);
-         OP_ARYL: ArrayLoad(op.left);
+         OP_ARYL: ArrayLoad(op.left, 0);
          OP_ELEM: ArrayElemMove(op.left, op.right);
          OP_VASN: MovRegs(op.left, op.right);
          OP_AITF: AssignIntToFloat(op.left, op.right);
@@ -1234,7 +1397,7 @@ begin
          OP_EXIS: NotImplemented;
          OP_EXLD: NotImplemented;
          OP_RAIS: NotImplemented;
-         OP_SRLD: LoadSelfRegister(op.left);
+         OP_SRLD: LoadSelfRegister(op.left, 0);
          OP_MCLS: NotImplemented;
          OP_TRNC: TruncReg(op.left, op.right)
          else CorruptError;

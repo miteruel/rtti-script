@@ -38,6 +38,7 @@ uses
 
 type
    TNameHackSymbol = class(TSymbol);
+   TStringArray = type TArray<string>;
 
 function BuildSysUnit(AddType: TAddType): TUnitSymbol;
 var
@@ -56,6 +57,7 @@ begin
    AddType(typeInfo(boolean), result);
    AddType(typeInfo(integer), result);
    AddType(typeInfo(string), result);
+   AddType(typeInfo(TStringArray), result);
    realType := ctx.GetType(TypeInfo(extended));
    if not NativeTypeDefined(realType) then
       AddNativeType(realType, TExternalType.Create(realType));

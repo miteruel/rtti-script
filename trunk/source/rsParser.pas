@@ -1703,7 +1703,8 @@ begin
       FCurrentUnit.LineMap.Add(cond, FCurrent.row);
       branch2 := NewBranch;
       result.Add(TJumpSyntax.Create(branch2, true));
-      if FCurrent.kind <> tkElse then
+      if FCurrent.kind = tkEnd then //do nothing
+      else if FCurrent.kind <> tkElse then
          result.Add(ReadLineOrBlock(breakTo, continueTo, exitTo));
       if Check(tkElse) and not (FCurrent.kind in [tkEnd, tkSem]) then
       begin
