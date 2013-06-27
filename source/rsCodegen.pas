@@ -20,7 +20,7 @@ unit rsCodegen;
 
 interface
 uses
-   Classes, Generics.Collections,
+   Classes, RTTI, Generics.Collections,
    rsDefs, rsDefsBackend;
 
 type
@@ -104,8 +104,10 @@ type
       procedure AssignSelfBinOp(lvalue: TVariableSyntax; rvalue: TBinOpSyntax);
       procedure PushParam(param: TTypedSyntax);
       function WriteArrayPropRead(value: TArrayPropSyntax): TrsAsmInstruction;
-    function WritePropertyValue(symbol: TPropSymbol;
-      sem: integer): TrsAsmInstruction;
+      function WritePropertyValue(symbol: TPropSymbol;
+        sem: integer): TrsAsmInstruction;
+      function SerializeArray(const value: TValue): string;
+      function SerializeConstant(value: TValueSyntax): string;
    public
       constructor Create;
       destructor Destroy; override;
@@ -115,7 +117,7 @@ type
 
 implementation
 uses
-   Windows, RTTI, Math,
+   Windows, Math,
    SysUtils, StrUtils, TypInfo,
    rsEnex, rsImport,
    vmtBuilder, newClass;
@@ -188,6 +190,21 @@ begin
    write(op);
 end;
 
+function TrsCodegen.SerializeArray(const value: TValue): string;
+var
+   sl: TStringList;
+   i: integer;
+begin
+   sl := TStringList.Create;
+   try
+      for i := 0 to value.GetArrayLength - 1 do
+         sl.add(value.GetArrayElement(i).ToString);
+      result := '[' + sl.CommaText + ']';
+   finally
+      sl.free;
+   end;
+end;
+
 function TrsCodegen.WriteConst(value: TValueSyntax): TrsAsmInstruction;
 begin
    result.left := NextReg(value.sem);
@@ -198,7 +215,7 @@ begin
    end
    else begin
       result.op := OP_MOVC;
-      result.right := FConstTable.AddObject(value.value.ToString, pointer(value.value.TypeInfo));
+      result.right := FConstTable.AddObject(SerializeConstant(value), pointer(value.value.TypeInfo))
    end;
 end;
 
@@ -383,6 +400,13 @@ begin
    end;
 end;
 
+function TrsCodegen.SerializeConstant(value: TValueSyntax): string;
+begin
+   if value.value.Kind in [tkArray, tkDynArray] then
+      result := SerializeArray(value.value)
+   else result := value.value.ToString;
+end;
+
 procedure TrsCodegen.PushParam(param: TTypedSyntax);
 var
    left: integer;
@@ -392,7 +416,7 @@ begin
    begin
       if TValueSyntax(param).value.Kind = tkInteger then
          WriteOp(OP_PSHI, TValueSyntax(param).value.AsInteger)
-      else WriteOp(OP_PSHC, FConstTable.AddObject(TValueSyntax(param).value.ToString, pointer(TValueSyntax(param).value.TypeInfo)));
+      else WriteOp(OP_PSHC, FConstTable.AddObject(serializeConstant(TValueSyntax(param)), pointer(TValueSyntax(param).value.TypeInfo)));
    end
    else begin
       left := Eval(param);
@@ -684,7 +708,7 @@ begin
    left := VariableIndex(lValue.symbol);
    if rvalue.value.Kind = tkInteger then
       WriteOp(OP_MOVI, left, rValue.value.AsInteger)
-   else WriteOp(OP_MOVC, left, FConstTable.AddObject(rvalue.value.ToString, pointer(rvalue.value.TypeInfo)));
+   else WriteOp(OP_MOVC, left, FConstTable.AddObject(SerializeConstant(rvalue), pointer(rvalue.value.TypeInfo)));
 end;
 
 procedure TrsCodegen.AssignSelfBinOp(lvalue: TVariableSyntax; rvalue: TBinOpSyntax);

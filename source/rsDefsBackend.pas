@@ -41,6 +41,8 @@ type
       OP_AS,   //as operator
       OP_SCAT, //string concatenation
       //arithmetic operations with a constant integer as the R param
+      OP_ADDI,
+      OP_SUBI,
       OP_MULI,
       OP_DIVI,
       OP_MODI,
@@ -81,8 +83,10 @@ type
       OP_PSHC, //Add a constant to the param list
       OP_CALL, //call with the current param list
       OP_CALX, //call an external function with the current param list
+      OP_CALM, //call an external magic function with the current param list
       OP_PCAL, //call and push result
       OP_PCLX, //call external and push result
+      OP_PCLM, //call external magic function and push result
       OP_INIT, //Initialize new function call with a certain number of temp variables
       OP_RET,  //return
       OP_JUMP, //unconditional jump
