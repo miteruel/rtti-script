@@ -33,12 +33,12 @@ function BuildSysUnit(AddType: TAddType): TUnitSymbol;
 
 implementation
 uses
-   SysUtils, RTTI,
+   SysUtils, RTTI, Types,
    rsImport;
 
 type
    TNameHackSymbol = class(TSymbol);
-   TStringArray = type TArray<string>;
+   TStringArray = type TStringDynArray;
 
 function BuildSysUnit(AddType: TAddType): TUnitSymbol;
 var
