@@ -612,6 +612,7 @@ function BooleanType: TTypeSymbol;
 function FindNativeType(const name: string): TTypeSymbol;
 function MakeArrayPropType(base: TTypeSymbol): TTypeSymbol;
 procedure AddArrayType(value: TArrayTypeSymbol);
+procedure ResetTables;
 
 procedure CheckCompatibleTypes(left, right: TTypeSymbol; exact: boolean = false);
 procedure EnsureCompatibleTypes(left: TTypeSymbol; var right: TTypedSyntax; exact: boolean = false);
@@ -1844,6 +1845,19 @@ begin
    finally
       TMonitor.Exit(LArrayPropTable);
    end;
+end;
+
+procedure ResetTables;
+begin
+   LTypeTable.Free;
+   LArrayTypeTable.Free;
+   LArrayPropTable.Free;
+   LFreeList.Free;
+   LTypeTable := TObjectDictionary<TRttiType, TTypeSymbol>.Create([doOwnsValues]);
+   LArrayPropTable := TObjectDictionary<string, TTypeSymbol>.Create([doOwnsValues]);
+   LArrayTypeTable := TDictionary<string, TTypeSymbol>.Create();
+   LFreeList := TObjectList<TTypeSymbol>.Create(true);
+   LBoolType := nil;
 end;
 
 const
