@@ -40,7 +40,6 @@ type
         prog: TrsProgram);
    public
       constructor Create;
-      destructor Destroy; override;
       function Link(const units: TUnitList; constants: TStringList; environment: TClass): TrsProgram;
    end;
 
@@ -163,12 +162,6 @@ begin
    FStartLocations.Duplicates := dupError;
 end;
 
-destructor TrsLinker.Destroy;
-begin
-   FStartLocations.Free;
-   inherited Destroy;
-end;
-
 procedure TrsLinker.IntegrateUnit(rsu: TrsScriptUnit; prog: TrsProgram);
 var
    pair: TPair<string, TrsProcInfo>;
@@ -219,6 +212,7 @@ begin
    for rsu in units do
       linkUnit(rsu, result);
    result.constants := constants;
+   result.SetUnitOffsets(FStartLocations);
 //OutputDebugString('SAMPLING OFF');
 end;
 

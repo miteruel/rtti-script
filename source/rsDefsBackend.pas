@@ -189,6 +189,7 @@ type
       FGlobals: TStringList;
       FConstants: TStringList;
       FArrayProperties: TStringList;
+      FUnitOffsets: TStringList;
       FScriptClasses: TList<TNewClass>;
       FPackage: IRttiPackage;
       FUnits: TList<INewUnit>;
@@ -201,12 +202,14 @@ type
       destructor Destroy; override;
       procedure InstallPackage(proc: TGetCodeAddressProc);
       procedure AddText(const value: TList<TrsAsmInstruction>);
+      procedure SetUnitOffsets(value: TStringList);
 
       property Text: TArray<TrsAsmInstruction> read FText;
       property Routines: TDictionary<string, TrsProcInfo> read FRoutines;
       property Units: TList<INewUnit> read FUnits;
       property Globals: TStringList read FGlobals;
       property Constants: TStringList read FConstants write SetConstants;
+      property UnitOffsets: TStringList read FUnitOffsets;
       property ScriptClasses: TList<TNewClass> read FScriptClasses;
       property ExtClasses: TList<TClass> read FExtClasses;
       property ArrayProps: TStringList read FArrayProperties;
@@ -302,6 +305,7 @@ end;
 
 destructor TrsProgram.Destroy;
 begin
+   FUnitOffsets.Free;
    FOpcodeMap.Free;
    FExtClasses.Free;
    FArrayProperties.Free;
@@ -330,6 +334,12 @@ procedure TrsProgram.SetConstants(const Value: TStringList);
 begin
    assert(FConstants = nil);
    FConstants := Value;
+end;
+
+procedure TrsProgram.SetUnitOffsets(value: TStringList);
+begin
+   assert(FUnitOffsets = nil);
+   FUnitOFfsets := value;
 end;
 
 { TMultimap<TKey, TValue> }
