@@ -328,14 +328,15 @@ var
    unitname: string;
    idx: integer;
 begin
-   impl := method.CreateImplementation(address, self.MethodImplementation);
    sl := FProgram.unitOffsets;
    unitname := method.parent.name;
    AnsiStartsText(RSUNIT_HEADER, unitName);
    unitName := Copy(unitName, length(RSUNIT_HEADER));
    idx := sl.IndexOf(unitName);
    assert(idx >= 0);
-   nativeUint(address) := nativeUInt(impl.CodeAddress) + nativeUInt(pointer(sl.Objects[idx]));
+   nativeUint(address) := nativeUInt(Address) + nativeUInt(pointer(sl.Objects[idx]));
+   impl := method.CreateImplementation(address, self.MethodImplementation);
+   address := impl.CodeAddress;
    FImpls.Add(impl);
    FProcMap.Add(method.Name, method);
    sl.Text;
