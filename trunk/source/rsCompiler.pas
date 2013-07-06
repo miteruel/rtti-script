@@ -343,13 +343,18 @@ var
    proc: TrsCompilerRegisterProc;
    lName: string;
    text: string;
+   dummy: TUnitSymbol;
 begin
    lName := UpperCase(name);
    if FUnitCache.TryGetValue(lName, &unit) then
    begin
       result := true;
       if not FUnitList.Contains(&unit) then
+      begin
          FUnitList.Add(&unit);
+         for lName in &unit.dependencies do
+            ProcessUses(lName, dummy);
+      end;
    end
    else if FExtUnits.TryGetValue(lName, proc) then
    begin

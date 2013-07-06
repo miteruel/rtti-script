@@ -301,16 +301,19 @@ type
       FPrivateTable: ISymbolTable;
       FExternal: boolean;
       FLineMap: TDictionary<TSyntax, integer>;
+      FDependencies: TStringList;
    public
       constructor Create(name: string; const publicTable, privateTable: ISymbolTable; isExternal: boolean = false);
       destructor Destroy; override;
       function SymbolLookup(const name: string): TSymbol;
       function Procs: TList<TProcSymbol>;
+      procedure AddDependency(const name: string);
 
       property LineMap: TDictionary<TSyntax, integer> read FLineMap;
       property publics: ISymbolTable read FPublicTable;
       property privates: ISymbolTable read FPrivateTable;
       property IsExternal: boolean read FExternal;
+      property Dependencies: TStringList read FDependencies;
    end;
 
    TSyntax = class
@@ -864,6 +867,11 @@ end;
 
 { TUnitSymbol }
 
+procedure TUnitSymbol.AddDependency(const name: string);
+begin
+   FDependencies.Add(name);
+end;
+
 constructor TUnitSymbol.Create(name: string; const publicTable, privateTable: ISymbolTable; isExternal: boolean = false);
 begin
    inherited Create(name, syUnit);
@@ -871,10 +879,12 @@ begin
    FPrivateTable := privateTable;
    FExternal := isExternal;
    FLineMap := TDictionary<TSyntax, integer>.Create;
+   FDependencies := TStringList.Create;
 end;
 
 destructor TUnitSymbol.Destroy;
 begin
+   FDependencies.Free;
    FLineMap.Free;
    inherited Destroy;
 end;
