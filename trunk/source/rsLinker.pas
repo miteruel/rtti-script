@@ -87,7 +87,7 @@ begin
       else opcode.op := OP_PCLX;
       opcode.right := -index;
    end
-   else opcode.right := (startpos + ref.location) - index;
+   else opcode.right := index - (startpos + ref.location);
    prog.Text[startpos + ref.location] := opcode;
 end;
 
