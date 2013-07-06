@@ -468,6 +468,7 @@ begin
       raise EParseError.CreateFmt('Used unit "%s" not found', [name]);
 
    assert(AnsiSameText(symbol.name, name));
+   FCurrentUnit.AddDependency(name);
    AddScope(symbol);
 end;
 
