@@ -154,6 +154,8 @@ begin
    FJumpTable := TDictionary<string, integer>.Create;
    FTryStack := TStack<TPair<TSyntaxKind, integer>>.Create;
    FConstTable := TStringList.Create;
+   FConstTable.AddObject('False', TypeInfo(boolean));
+   FConstTable.AddObject('True', TypeInfo(boolean));
    FLocals := TStringList.Create;
    FUnresolvedJumpTable := TList<TPair<string, integer>>.Create;
    FUnresStack := TStack<TPair<string, TReferenceType>>.Create;
@@ -416,6 +418,8 @@ begin
    begin
       if TValueSyntax(param).value.Kind = tkInteger then
          WriteOp(OP_PSHI, TValueSyntax(param).value.AsInteger)
+      else if TValueSyntax(param).value.TypeInfo = TypeInfo(boolean) then
+         WriteOp(OP_PSHC, ord(TValueSyntax(param).value.AsBoolean))
       else WriteOp(OP_PSHC, FConstTable.AddObject(serializeConstant(TValueSyntax(param)), pointer(TValueSyntax(param).value.TypeInfo)));
    end
    else begin
@@ -708,6 +712,8 @@ begin
    left := VariableIndex(lValue.symbol);
    if rvalue.value.Kind = tkInteger then
       WriteOp(OP_MOVI, left, rValue.value.AsInteger)
+   else if rValue.value.TypeInfo = TypeInfo(boolean) then
+      WriteOp(OP_MOVC, left, ord(rValue.value.AsBoolean))
    else WriteOp(OP_MOVC, left, FConstTable.AddObject(SerializeConstant(rvalue), pointer(rvalue.value.TypeInfo)));
 end;
 
@@ -866,6 +872,8 @@ begin
       FLocals.Insert(proc.paramList.count, 'RESULT');
    end;
    FLocals.Insert(0, '');
+   FTempQueue.Clear;
+   FTempList.Clear;
 end;
 
 procedure TrsCodegen.ProcessProc(proc: TProcSymbol);
