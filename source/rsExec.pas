@@ -1484,7 +1484,9 @@ end;
 
 procedure TrsVM.SetValue(i: integer; const val: TValue);
 begin
-   AssignValue(GetValue(i), @val);
+   if i = 0 then
+      FContext.br := val.AsBoolean
+   else AssignValue(GetValue(i), @val);
 end;
 
 procedure TrsVM.SetValue(i: integer; const val: integer);
