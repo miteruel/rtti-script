@@ -1060,8 +1060,7 @@ begin
    FStack.Push(FContext);
    retval := InvokeCode(GetIP + r, args);
    FContext := FStack.Pop;
-   //TODO: this will break if a function returns nil. Hooray for the semipredicate problem!  Fix this.
-   if not retval.IsEmpty then
+   if l <> -1 then
       SetValue(l, retval);
 end;
 
