@@ -1780,28 +1780,25 @@ begin
       asn := TAssignmentSyntax.Create(TVariableSyntax.Create(value), cond);
       FCurrentUnit.LineMap.Add(asn, FCurrent.row);
       result.Add(asn);
-      nextCase := '';
+      nextCase := NewBranch;
       endpoint := NewBranch;
       repeat //TODO: optimize CASE codegen
          result.Add(ReadCaseLabels(value));
          action := TBlockSyntax.Create;
          result.Add(action);
-         if nextCase <> '' then
-            action.Add(TJumpSyntax.Create(nextCase));
+         action.Add(TJumpSyntax.Create(nextCase, true));
          if FCurrent.kind <> tkSem then
             action.add(ReadLineOrBlock(breakTo, continueTo, exitTo));
          if not (FCurrent.kind in [tkElse, tkEnd, tkSem]) then
             raise EParseError.Create('Semicolon expected');
          Check(tkSem);
          action.Add(TJumpSyntax.Create(endpoint));
-         if nextcase <> '' then
-            result.add(TLabelSyntax.Create(nextcase));
+         result.add(TLabelSyntax.Create(nextcase));
          nextcase := NewBranch;
       until FCurrent.kind in [tkElse, tkEnd];
       result.add(TLabelSyntax.Create(nextcase));
       if Check(tkElse) and not (FCurrent.kind in [tkEnd, tkSem]) then
       begin
-         action.Add(TJumpSyntax.Create(nextCase));
          result.Add(ReadLineOrBlock(breakTo, continueTo, exitTo));
          check(tkSem);
       end;
