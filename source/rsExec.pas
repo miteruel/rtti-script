@@ -57,6 +57,7 @@ type
    private
       //debug routine for until I get an actual debugger set up
       procedure RegState; virtual;
+      procedure DumpProgram; virtual;
    private
       FParent: TrsExec;
       FDepth: integer;
@@ -214,7 +215,7 @@ type
 
 implementation
 uses
-   StrUtils, Types, Math, Classes, tlHelp32,
+   StrUtils, Types, Math, Classes, tlHelp32, IOUtils,
    rsEnex,
    vmtStructure;
 
@@ -281,6 +282,10 @@ var
 begin
    vm := GetVM;
    vm.FPackage := FProgram.package;
+{   try
+      vm.DumpProgram;
+   except
+   end;}
    result := vm.InvokeCode(NativeInt(UserData), args);
 end;
 
@@ -1526,6 +1531,19 @@ var
 begin
    for i := 0 to high(FContext.locals) do
       Writeln(format('%d: %s', [i, FContext.locals[i].ToString]));
+end;
+
+procedure TrsVM.DumpProgram;
+var
+   ms: TMemoryStream;
+begin
+   ms := TMemoryStream.Create;
+   try
+      ms.Write(FParent.FProgram.Text[0], length(FParent.FProgram.Text) * sizeof(TRSAsmInstruction));
+      ms.SaveToFile(TPath.Combine(ExtractFilePath(ParamStr(0)), 'RS Dump.bin'));
+   finally
+      ms.Free;
+   end;
 end;
 
 { TrsVM.TSimpleParamList }
