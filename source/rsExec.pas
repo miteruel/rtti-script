@@ -279,6 +279,7 @@ end;
 procedure TrsExec.MethodImplementation(UserData: Pointer; const Args: TArray<TValue>; out Result: TValue);
 var
    vm: TrsVM;
+   reentrant: boolean;
 begin
    vm := GetVM;
    vm.FPackage := FProgram.package;
@@ -286,7 +287,15 @@ begin
       vm.DumpProgram;
    except
    end;}
-   result := vm.InvokeCode(NativeInt(UserData), args);
+   reentrant := assigned(vm.FContext.ip);
+   if reentrant then
+      vm.FStack.Push(vm.FContext);
+   try
+      result := vm.InvokeCode(NativeInt(UserData), args);
+   finally
+      if reentrant then
+         vm.FContext := vm.FStack.Pop;
+   end;
 end;
 
 //thanks to Raymond Chen for the code to find all thread IDs
