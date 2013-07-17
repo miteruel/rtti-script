@@ -110,6 +110,8 @@ type
       procedure MovInt(l, r: integer);
       procedure MovProp(l, r: integer);
       procedure MovArrayProp(l, r: integer);
+      procedure MovArrayPropSR(l, r: integer);
+      procedure MovPropSR(l, r: integer);
       procedure PropAssign(l, r: integer);
       procedure ArrayPropAssign(l, r: integer);
       procedure NegRegister(l, r: integer);
@@ -881,6 +883,25 @@ begin
    SetValue(l, FParent.FArrayProcTableR[r](GetSR, args));
 end;
 
+procedure TrsVM.MovPropSR(l, r: integer);
+var
+   sr: TObject;
+   prop: TRttiProperty;
+begin
+   prop := FParent.FProgram.Properties.Objects[r] as TRttiProperty;
+   sr := GetSR.AsObject;
+   FSrStack.Push(TsrPair.Create(prop.GetValue(sr), FDepth));
+end;
+
+procedure TrsVM.MovArrayPropSR(l, r: integer);
+var
+   args: TArray<TValue>;
+begin
+   args := FParamLists.Peek.ToArray;
+   FParamLists.Pop;
+   FSrStack.Push(TsrPair.Create(FParent.FArrayProcTableR[r](GetSR, args), FDepth));
+end;
+
 procedure TrsVM.NegRegister(l, r: integer);
 var
    val2: PValue;
@@ -1389,6 +1410,8 @@ begin
          OP_MOVF: NotImplemented;
          OP_MOVP: MovProp(op.left, op.right);
          op_MVAP: MovArrayProp(op.left, op.right);
+         OP_MOVPSR: MovPropSR(op.left, op.right);
+         OP_MVAPSR: MovArrayPropSR(op.left, op.right);
          OP_NEG:  NegRegister(op.left, op.right);
          OP_NOT:  NotRegister(op.left, op.right);
          OP_INC:  IncRegister(op.left, op.right);

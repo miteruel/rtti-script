@@ -108,6 +108,10 @@ type
         sem: integer): TrsAsmInstruction;
       function SerializeArray(const value: TValue): string;
       function SerializeConstant(value: TValueSyntax): string;
+      procedure AssignmentPeephole(start: integer);
+      procedure LoadSR(l: integer);
+      procedure ChangeLeft(index, value: integer);
+      procedure ChangeLastOp(value: TrsOpcode);
    public
       constructor Create;
       destructor Destroy; override;
@@ -451,7 +455,7 @@ begin
       left := Eval(value.SelfSymbol);
       if left = -1 then
          PopUnres;
-      WriteOp(OP_SRLD, left);
+      LoadSR(left);
    end;
    result.op := OP_CALL;
    result.right := ResolveCall(value.proc.fullName, FCurrent.Text.Count);
@@ -498,7 +502,7 @@ begin
    left := Eval(value.Left);
    if left = -1 then
       popUnres;
-   WriteOp(OP_SRLD, left);
+   LoadSR(left);
 
    result.op := OP_NOP;
    result.left := Eval(value.Right);
@@ -539,7 +543,7 @@ begin
    left := Eval(base.Left);
    if left = -1 then
       popUnres;
-   WriteOp(OP_SRLD, left);
+   LoadSR(left);
 
    result.op := OP_MVAP;
    result.left := NextReg(value.sem);
@@ -572,6 +576,18 @@ begin
    if value.kind <> skBoolOp then
       result := op.left
    else result := 0;
+end;
+
+procedure TrsCodegen.LoadSR(l: integer);
+var
+   prev: TrsAsmInstruction;
+begin
+   prev := FCurrent.Text.Last;
+   if (prev.op = OP_MOVP) and (prev.left = l) then
+      ChangeLastOp(OP_MOVPSR)
+   else if (prev.op = OP_MVAP) and (prev.left = l) then
+      ChangeLastOp(OP_MVAPSR)
+   else writeOp(OP_SRLD, l);
 end;
 
 function TrsCodegen.NextReg(temp: integer): integer;
@@ -639,7 +655,7 @@ begin
    sr := Eval(lValue.base.left);
    if sr = -1 then
       PopUnres;
-   WriteOp(OP_SRLD, sr);
+   LoadSR(sr);
 
    FCurrent.Unresolved.Add(TUnresolvedReference.Create(((lValue.base.Right as TVariableSyntax).Symbol as TPropSymbol).WriteSpec.fullName, FCurrent.Text.Count, rtArrayProp));
    WriteOp(OP_APSN, -1, rValue);
@@ -658,7 +674,7 @@ procedure TrsCodegen.AssignProp(selfVal, rValue: integer; prop: TVariableSyntax)
 var
    propSym: TPropSymbol;
 begin
-   WriteOp(OP_SRLD, selfVal);
+   LoadSR(selfVal);
    propSym := prop.symbol as TPropSymbol;
    FCurrent.Unresolved.Add(TUnresolvedReference.Create(propSym.fullName, FCurrent.Text.Count, rtProp));
    WriteOp(OP_PASN, -1, rValue);
@@ -666,7 +682,7 @@ end;
 
 procedure TrsCodegen.AssignElemProp(selfVal, rValue: integer; prop: TElemSyntax);
 begin
-   WriteOp(OP_SRLD, selfVal);
+   LoadSR(selfVal);
    AssignElem(prop, rValue);
 end;
 
@@ -731,7 +747,68 @@ begin
    WriteOp(OPCODES[rValue.op], left, right);
 end;
 
+procedure TrsCodegen.ChangeLastOp(value: TrsOpcode);
+var
+   index: integer;
+   op: TrsAsmInstruction;
+begin
+   index := FCurrent.text.count - 1;
+   op := FCurrent.Text[index];
+   op.op := value;
+   FCurrent.Text[index] := op;
+end;
+
+procedure TrsCodegen.ChangeLeft(index, value: integer);
+var
+   op: TrsAsmInstruction;
+begin
+   op := FCurrent.Text[index];
+   op.left := value;
+   FCurrent.Text[index] := op;
+end;
+
+procedure TrsCodegen.AssignmentPeephole(start: integer);
+var
+   i, j: integer;
+   mov, ml, mr: integer;
+   valid: boolean;
+   op: TrsAsmInstruction;
+begin
+   mov := -1; ml := -1; mr := -1;
+   valid := false;
+   i := start;
+   while i < FCurrent.Text.Count do
+   begin
+      op := FCurrent.Text[i];
+      if op.op = OP_MOV then
+      begin
+         mov := i;
+         ml := op.left;
+         mr := op.right;
+         valid := true;
+      end
+      else if valid and (op.op = OP_VASN) and (op.left = mr) and (op.right = ml) then
+      begin
+         FCurrent.Text.Delete(mov);
+         dec(i);
+         for j := mov to i do
+            if FCurrent.Text[j].left = ml then
+               ChangeLeft(j, mr);
+         FCurrent.text.Delete(i);
+         dec(i);
+         valid := false;
+         if ml = FFreeReg then
+            dec(FFreeReg);
+      end
+      else if valid and not ((op.op in [OP_ADD..OP_SHR, OP_MULI..OP_SHRI]) and (op.left = ml)) then
+         valid := false;
+      inc(i);
+   end;
+end;
+
 procedure TrsCodegen.WriteAssign(value: TAssignmentSyntax);
+var
+   current: integer;
 begin
    // x := 5;
    if (value.lvalue.kind = skVariable) and (value.rvalue.kind = skValue) then
@@ -742,7 +819,11 @@ begin
       (TVariableSyntax(TBinOpSyntax(value.rValue).left).symbol = TVariableSyntax(value.lValue).symbol) then
       AssignSelfBinOp(TVariableSyntax(value.lValue), TBinOpSyntax(value.rValue))
    //general case
-   else AssignLValue(value.lValue, Eval(value.rValue));
+   else begin
+      current := FCurrent.Text.Count;
+      AssignLValue(value.lValue, Eval(value.rValue));
+      AssignmentPeephole(current);
+   end;
 end;
 
 procedure TrsCodegen.WriteTryBlock(opcode: TrsOpcode; opType: TSyntaxKind);
