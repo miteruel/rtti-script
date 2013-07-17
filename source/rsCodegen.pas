@@ -325,6 +325,8 @@ begin
    else begin
       result.right := Eval(value.right);
       result.op := OPCODES[value.op];
+      if (result.left = 0) and (value.op in [opEquals, opNotEqual]) then
+         inc(result.op, ord(OP_EQB) - ord(OP_EQ));
    end;
 end;
 
