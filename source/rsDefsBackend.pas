@@ -58,6 +58,8 @@ type
       OP_MOVF, //mov field
       OP_MOVP, //mov property
       OP_MVAP, //mov array property
+      OP_MOVPSR, //mov property directly to SR
+      OP_MVAPSR, //mov array property directly to SR
       OP_NEG,  //negation
       OP_NOT,  //not operator
       OP_INC,  //inc function
@@ -74,6 +76,8 @@ type
       OP_LTI,  // reg < integer constant
       OP_EQI,  // reg = integer constant
       OP_NEQI, // reg <> integer constant
+      OP_EQB,  // reg = BR
+      OP_NEQB, // reg <> BR
       OP_IN,   //in operator
       OP_IS,   //is operator
       OP_XORB, //boolean xor

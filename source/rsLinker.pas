@@ -98,11 +98,11 @@ var
    index: integer;
 begin
    opcode := prog.Text[startpos + ref.location];
-   assert(opcode.op in [OP_MVAP, OP_APSN]);
+   assert(opcode.op in [OP_MVAP, OP_APSN, OP_MVAPSR]);
    index := prog.ArrayProps.IndexOf(ref.name);
    if index < 0 then
       raise ELinkError.CreateFmt('Missing array property reference: %s', [ref.name]);
-   if opcode.op = OP_MVAP then
+   if opcode.op in [OP_MVAP, OP_MVAPSR] then
    begin
       assert(opcode.right = -1);
       opcode.right := index;
@@ -121,7 +121,7 @@ var
    index: integer;
 begin
    opcode := prog.Text[startpos + ref.location];
-   assert(opcode.op in [OP_PASN, OP_MOVP]);
+   assert(opcode.op in [OP_PASN, OP_MOVP, OP_MOVPSR]);
    index := prog.Properties.IndexOf(ref.name);
    if index < 0 then
       raise ELinkError.CreateFmt('Missing property reference: %s', [ref.name]);
