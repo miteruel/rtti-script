@@ -122,6 +122,8 @@ type
       procedure CompLt(l, r: integer);
       procedure CompEq(l, r: integer);
       procedure CompNeq(l, r: integer);
+      procedure CompEqb(l, r: integer);
+      procedure CompNeqb(l, r: integer);
       function RegAsBoolean(index: integer): boolean;
       procedure XorbRegs(l, r: integer);
       procedure NewList(l, r: integer);
@@ -972,6 +974,20 @@ begin
    end;
 end;
 
+procedure TrsVM.CompEqb(l, r: integer);
+var
+   val2: PValue;
+begin
+   val2 := GetValue(r);
+   FContext.br := FContext.br = val2.AsBoolean;
+end;
+
+procedure TrsVM.CompNeqb(l, r: integer);
+begin
+   CompEqb(l, r);
+   FContext.br := not FContext.br;
+end;
+
 procedure TrsVM.CompGtei(l, r: integer);
 var
    val: PValue;
@@ -1218,6 +1234,7 @@ end;
 
 type TOpcodeProc = procedure (Self: TObject; l, r: integer);
 
+{
 const
   OP_PROCS: array[TrsOpcode] of pointer =
    (nil,                 //OP_NOP
@@ -1329,9 +1346,10 @@ const
          OP_EXLD: NotImplemented;
          OP_RAIS: NotImplemented;
          OP_MCLS: NotImplemented;
-}
+
 var
    OPCODES: array[TrsOpcode] of TOpcodeProc absolute OP_PROCS;
+}
 
 function TrsVM.RunLoop(resultIndex: integer; expected: TrsOpcode): TValue;
 var
@@ -1387,6 +1405,8 @@ begin
          OP_LTI:  CompLti(op.left, op.right);
          OP_EQI:  CompEqi(op.left, op.right);
          OP_NEQI: CompNeqi(op.left, op.right);
+         OP_EQB:  CompEqb(op.left, op.right);
+         OP_NEQB: CompNeqb(op.left, op.right);
          OP_IN:   NotImplemented;
          OP_IS:   NotImplemented;
          OP_XORB: XorbRegs(op.left, op.right);
