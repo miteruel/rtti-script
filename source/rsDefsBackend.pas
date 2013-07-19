@@ -167,6 +167,7 @@ type
       FExtClasses: TList<TClass>;
       FProperties: TStringList;
       FOpcodeMap: TList<integer>;
+      procedure RoutineNotify(Sender: TObject; const Item: TrsProcInfo; Action: TCollectionNotification);
    public
       constructor Create(const name: string; isExternal: boolean);
       destructor Destroy; override;
@@ -246,6 +247,7 @@ begin
    FExternal := isExternal;
    FText := TList<TrsAsmInstruction>.Create;
    FRoutines := TDictionary<string, TrsProcInfo>.Create;
+   FRoutines.OnValueNotify := RoutineNotify;
    FUnresolved := TUnresList.Create(true);
    FUnresolvedCalls := TUnresList.Create(true);
    FGlobals := TStringList.Create;
@@ -268,6 +270,13 @@ begin
    FRoutines.Free;
    FText.Free;
    inherited;
+end;
+
+procedure TrsScriptUnit.RoutineNotify(Sender: TObject; const Item: TrsProcInfo;
+  Action: TCollectionNotification);
+begin
+   if (action = cnRemoved) and (not item.standalone) then
+      FreeMem(item.info);
 end;
 
 { TUnresolvedReference }
