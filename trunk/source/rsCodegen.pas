@@ -885,7 +885,6 @@ begin
       else info := nil;
       result.info := vmtBuilder.CreateMethodInfo(pointer(start), proc.name, ccReg,
          info, params.ToArray);
-      RegisterExpectedMemoryLeak(result.info);
       result.isExternal := ext;
       result.standalone := standalone;
    finally
