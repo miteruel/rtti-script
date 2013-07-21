@@ -221,7 +221,9 @@ begin
    end
    else begin
       result.op := OP_MOVC;
-      result.right := FConstTable.AddObject(SerializeConstant(value), pointer(value.value.TypeInfo))
+      if value.value.TypeInfo = TypeInfo(boolean) then
+         result.right := ord(value.value.AsBoolean)
+      else result.right := FConstTable.AddObject(SerializeConstant(value), pointer(value.value.TypeInfo))
    end;
 end;
 
@@ -680,12 +682,6 @@ begin
    WriteOp(OP_PASN, -1, rValue);
 end;
 
-procedure TrsCodegen.AssignElemProp(selfVal, rValue: integer; prop: TElemSyntax);
-begin
-   LoadSR(selfVal);
-   AssignElem(prop, rValue);
-end;
-
 procedure TrsCodegen.AssignDot(lValue: TDotSyntax; rValue: integer);
 var
    selfVal: integer;
@@ -693,8 +689,8 @@ begin
    selfVal := eval(lValue.left);
    if selfVal = -1 then
       PopUnres;
-   if lValue.Right.kind = skElem then
-      AssignElemProp(selfVal, rValue, lValue.Right as TElemSyntax)
+   if lValue.Right.kind = skArrayProp then
+      AssignArrayProp(TArrayPropSyntax(lValue.Right), rValue)
    else case (lValue.right as TVariableSyntax).symbol.kind of
       syProp: AssignProp(selfVal, rValue, TVariableSyntax(lValue.right));
 //      syVariable: AssignField(selfVal, dotVal, rValue);

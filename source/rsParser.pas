@@ -563,9 +563,11 @@ var
    synType: TTypeSymbol;
    arrayFlag: boolean;
    second: TSyntax;
+   oldLastSelf: TVarSymbol;
 begin
    result := ReadSubIdentifier;
    try
+      oldLastSelf := FLastSelf;
       while FCurrent.kind in [tkDot, tkOpenBracket] do
       begin
          if not (result is TTypedSyntax) then
@@ -582,6 +584,16 @@ begin
             raise EParseError.CreateFmt('The "%s" operator cannot be used on an expression of type "%s".', [FCurrent.origText, synType.name]);
          arrayFlag := FCurrent.kind = tkOpenBracket;
          Next;
+         if not ArrayFlag then
+         begin
+            FSubExprNamespace := synType.GetSymbolTable;
+            second := ReadSubIdentifier;
+            if Check(tkOpenBracket) then
+            begin
+               arrayFlag := true;
+               result := TDotSyntax.Create(TTypedSyntax(result), TTypedSyntax(second));
+            end;
+         end;
          if arrayFlag then
          begin
             if TTypedSyntax(result).&type is TClassTypeSymbol then
@@ -590,10 +602,6 @@ begin
             FSubExprNamespace := nil;
             second := ReadExpression;
             Expect(tkCloseBracket);
-         end
-         else begin
-            FSubExprNamespace := synType.GetSymbolTable;
-            second := ReadIdentifier;
          end;
          if not (second is TTypedSyntax) then
             raise EParseError.Create('Typed expression expected');
@@ -612,6 +620,7 @@ begin
             result := TDotSyntax.Create(TTypedSyntax(result), TTypedSyntax(second));
          end;
       end;
+      FLastSelf := oldLastSelf;
    except
       result.free;
       raise;
