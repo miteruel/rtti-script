@@ -74,7 +74,6 @@ type
       procedure AssignDot(lValue: TDotSyntax; rValue: integer);
       procedure AssignProp(selfVal, rValue: integer; prop: TVariableSyntax);
       procedure AssignArrayProp(lValue: TArrayPropSyntax; rValue: integer);
-      procedure AssignElemProp(selfVal, rValue: integer; prop: TElemSyntax);
 {      procedure AssignField(lValue: TFieldSyntax; rValue: integer);
       procedure AssignProp(lValue: TPropSyntax; rValue: integer); }
       procedure WriteTryBlock(opcode: TrsOpcode; opType: TSyntaxKind);
