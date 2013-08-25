@@ -221,7 +221,10 @@ begin
    else begin
       result.op := OP_MOVC;
       if value.value.TypeInfo = TypeInfo(boolean) then
-         result.right := ord(value.value.AsBoolean)
+      begin
+         result.op := OP_MOVB;
+         result.right := ord(value.value.AsBoolean);
+      end
       else result.right := FConstTable.AddObject(SerializeConstant(value), pointer(value.value.TypeInfo))
    end;
 end;
@@ -331,7 +334,11 @@ begin
       result.right := Eval(value.right);
       result.op := OPCODES[value.op];
       if (result.left = 0) and (value.op in [opEquals, opNotEqual]) then
+      begin
          inc(result.op, ord(OP_EQB) - ord(OP_EQ));
+         if FCurrent.Text.Last.op = OP_MOVB then
+            ChangeLastOp(OP_MOVC);
+      end;
    end;
 end;
 
@@ -726,7 +733,7 @@ begin
    if rvalue.value.Kind = tkInteger then
       WriteOp(OP_MOVI, left, rValue.value.AsInteger)
    else if rValue.value.TypeInfo = TypeInfo(boolean) then
-      WriteOp(OP_MOVC, left, ord(rValue.value.AsBoolean))
+      WriteOp(OP_MOVB, left, ord(rValue.value.AsBoolean))
    else WriteOp(OP_MOVC, left, FConstTable.AddObject(SerializeConstant(rvalue), pointer(rvalue.value.TypeInfo)));
 end;
 
