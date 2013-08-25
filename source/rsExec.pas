@@ -33,6 +33,7 @@ type
    TArrayPropImport = reference to procedure(const classname, name: string; const OnRead: TExtFunction; const OnWrite: TExtProcedure);
    TrsExecImportProc = reference to procedure(RegisterFunction: TExecImportCall; RegisterArrayProp: TArrayPropImport);
    TOnLineEvent = reference to procedure(Sender: TrsVM; const line: TrsDebugLineInfo);
+   TZeroDivideHandler = reference to function(Sender: TrsVM; l: integer; var handled: boolean): integer;
 
    TrsVM = class
    private type
@@ -68,6 +69,7 @@ type
       FText: TArray<TrsAsmInstruction>;
       FLastLine: TrsDebugLineInfo;
       FPackage: IRttiPackage;
+      FOnDivideByZero: TZeroDivideHandler;
 
       function InvokeCode(index: integer; const Args: TArray<TValue>): TValue;
       function RunLoop(resultIndex: integer; expected: TrsOpcode): TValue;
@@ -107,6 +109,7 @@ type
       procedure ShrInt(l, r: integer);
       procedure MovRegs(l, r: integer);
       procedure MovConst(l, r: integer);
+      procedure MovBool(l, r: integer);
       procedure MovInt(l, r: integer);
       procedure MovProp(l, r: integer);
       procedure MovArrayProp(l, r: integer);
@@ -178,6 +181,7 @@ type
       FArrayProcTableW: TArray<TExtProcedure>;
       FSystemLoaded: boolean;
       FOnLine: TOnLineEvent;
+      FOnDivideByZero: TZeroDivideHandler;
 
       class var
       FBlank: TValue;
@@ -213,6 +217,7 @@ type
       property RunOnLoad: boolean read FRunOnLoad write FRunOnLoad;
       property MaxStackDepth: integer read FMaxStackDepth write FMaxStackDepth;
       property OnLine: TOnLineEvent read FOnLine write FOnLine;
+      property OnDivideByZero: TZeroDivideHandler read FOnDivideByZero write FOnDivideByZero;
    end;
 
    ErsRuntimeError = class(Exception);
@@ -652,6 +657,7 @@ begin
    FStack := TStack<TVmContext>.Create;
    FsrStack := TStack<TsrPair>.Create;
    FText := parent.FText;
+   FOnDivideByZero := parent.FOnDivideByZero;
 end;
 
 destructor TrsVM.Destroy;
@@ -700,9 +706,26 @@ end;
 procedure TrsVM.DivRegs(l, r: integer);
 var
    val: PValue;
+   handled: boolean;
+   errResult: integer;
 begin
    val := GetValue(l);
-   SetValue(l, val.AsInteger div GetValue(r).AsInteger);
+   try
+      SetValue(l, val.AsInteger div GetValue(r).AsInteger);
+   except
+      on EDivByZero do
+      begin
+         if assigned(FOnDivideByZero) then
+         begin
+            handled := false;
+            errResult := FOnDivideByZero(self, val.AsInteger, handled);
+            if handled then
+               SetValue(l, errResult)
+            else raise;
+         end
+         else raise;
+      end;
+   end;
 end;
 
 procedure TrsVM.FdivRegs(l, r: integer);
@@ -857,6 +880,12 @@ end;
 procedure TrsVM.MovConst(l, r: integer);
 begin
    SetValue(l, FParent.FConstants[r]);
+end;
+
+procedure TrsVM.MovBool(l, r: integer);
+begin
+   MovConst(l, r);
+   FContext.br := boolean(r);
 end;
 
 procedure TrsVM.MovInt(l, r: integer);
@@ -1406,6 +1435,7 @@ begin
 
          OP_MOV:  MovRegs(op.left, op.right);
          OP_MOVC: MovConst(op.left, op.right);
+         OP_MOVB: MovBool(op.left, op.right);
          OP_MOVI: MovInt(op.left, op.right);
          OP_MOVF: NotImplemented;
          OP_MOVP: MovProp(op.left, op.right);

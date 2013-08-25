@@ -54,6 +54,7 @@ type
 
       OP_MOV,  //load value into register
       OP_MOVC, //mov constant
+      OP_MOVB, //mov boolean
       OP_MOVI, //mov integer
       OP_MOVF, //mov field
       OP_MOVP, //mov property
