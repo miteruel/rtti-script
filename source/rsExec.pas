@@ -277,11 +277,16 @@ function TrsExec.GetVM: TrsVM;
 var
    id: cardinal;
 begin
-   id := TThread.CurrentThread.ThreadID;
-   if not FvmMap.TryGetValue(id, result) then
-   begin
-      result := TrsVM.Create(self);
-      FvmMap.Add(id, result);
+   TMonitor.Enter(FVmMap);
+   try
+      id := TThread.CurrentThread.ThreadID;
+      if not FvmMap.TryGetValue(id, result) then
+      begin
+         result := TrsVM.Create(self);
+         FvmMap.Add(id, result);
+      end;
+   finally
+      TMonitor.Exit(FVmMap);
    end;
 end;
 

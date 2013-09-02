@@ -187,7 +187,7 @@ var
 begin
    FHeap.GetMem(result, sizeof(TPackageTypeInfo));
    result.TypeCount := GetTypeCount;
-   FHeap.GetMem(result.TypeTable, result.TypeCount * sizeof(pointer));
+   FHeap.GetMem(result.TypeTable, result.TypeCount * sizeof(pointer) * 2);
    i := -1;
    for newUnit in FUnits do
       for scriptClass in newUnit do
