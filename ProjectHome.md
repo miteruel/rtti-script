@@ -1,0 +1,1 @@
+A new script engine with Delphi, built on top of the extended RTTI system to provide a more seamless integration with native code than is possible in other scripting systems. Features the ability to create new classes from within the script engine that are available to native code routines and appear as genuine objects like any other.
